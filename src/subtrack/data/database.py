@@ -1,0 +1,71 @@
+"""SQLite connection and schema migrations.
+
+Each migration is a SQL script. The number of applied migrations is stored in
+PRAGMA user_version, so adding a new entry to MIGRATIONS upgrades existing
+databases on the next start.
+"""
+
+import sqlite3
+from pathlib import Path
+
+MIGRATIONS: list[str] = [
+    # 1 - initial schema
+    """
+    CREATE TABLE subscriptions (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        name               TEXT    NOT NULL,
+        price              TEXT    NOT NULL,
+        currency           TEXT    NOT NULL,
+        billing_cycle      TEXT    NOT NULL,
+        first_payment_date TEXT    NOT NULL,
+        category           TEXT    NOT NULL,
+        trial_end_date     TEXT,
+        rarely_used        INTEGER NOT NULL DEFAULT 0,
+        active             INTEGER NOT NULL DEFAULT 1,
+        notes              TEXT    NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+
+    INSERT INTO settings (key, value) VALUES
+        ('base_currency', 'RON'),
+        ('reminder_days_before', '3'),
+        ('rate_EUR', '4.97'),
+        ('rate_USD', '4.60'),
+        ('start_with_windows', '0');
+    """,
+    # 2 - remember which reminders were already shown, so each appears once
+    """
+    CREATE TABLE shown_reminders (
+        subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+        kind            TEXT    NOT NULL,
+        due_date        TEXT    NOT NULL,
+        PRIMARY KEY (subscription_id, kind, due_date)
+    );
+    """,
+]
+
+
+class Database:
+    def __init__(self, path: Path | str):
+        """Open the database at path (":memory:" works for tests) and migrate it."""
+        self.connection = sqlite3.connect(str(path))
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA foreign_keys = ON")
+        self._migrate()
+
+    @property
+    def schema_version(self) -> int:
+        return self.connection.execute("PRAGMA user_version").fetchone()[0]
+
+    def _migrate(self) -> None:
+        for version in range(self.schema_version, len(MIGRATIONS)):
+            with self.connection:
+                self.connection.executescript(MIGRATIONS[version])
+                self.connection.execute(f"PRAGMA user_version = {version + 1}")
+
+    def close(self) -> None:
+        self.connection.close()

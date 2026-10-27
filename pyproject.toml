@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subtrack"
+dynamic = ["version"]
+description = "Desktop application for managing personal subscriptions"
+requires-python = ">=3.11"
+dependencies = ["PySide6>=6.7"]
+
+[tool.setuptools.dynamic]
+# Single source of truth for the version: src/subtrack/__init__.py.
+# The release workflow checks that the git tag matches it.
+version = { attr = "subtrack.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,105 @@
+name: Build
+
+# - Every push and pull request: run the tests, build the .exe, portable zip and installer,
+#   and keep them as workflow artifacts (Actions tab → run → Artifacts) for 14 days.
+# - Pushing a tag like v0.2.0: the same, then publish a GitHub Release with the files.
+#   The tag must match __version__ in src/subtrack/__init__.py.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -v
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = python -c "import sys; sys.path.insert(0, 'src'); import subtrack; print(subtrack.__version__)"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$version") {
+            throw "Tag ${{ github.ref_name }} does not match __version__ $version. Update src/subtrack/__init__.py or the tag."
+          }
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build exe, portable zip and installer
+        shell: pwsh
+        run: ./build.ps1 -SkipTests -RequireInstaller -Python python
+
+      - name: Write checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SubTrack-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "SubTrack ${{ github.ref_name }}" \
+            --generate-notes
