@@ -13,11 +13,13 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QSpinBox,
 )
 
-from subtrack.domain.models import BillingCycle, Category, Currency, Subscription
+from subtrack.domain.models import BillingCycle, Category, Currency, PriceChange, Subscription
 
 
 def _to_qdate(value: date) -> QDate:
@@ -28,8 +30,21 @@ def _from_qdate(value: QDate) -> date:
     return date(value.year(), value.month(), value.day())
 
 
+def describe_price_history(history: list[PriceChange]) -> str:
+    """e.g. '12 Mar 2026: 39.99 → 49.99 RON (+25.0%)', one line per change, newest first."""
+    lines = []
+    for change in reversed(history):
+        old = f"{change.old_price:.2f}" + ("" if change.old_currency is change.new_currency else f" {change.old_currency.value}")
+        line = f"{change.changed_on:%d %b %Y}: {old} → {change.new_price:.2f} {change.new_currency.value}"
+        if change.old_currency is change.new_currency and change.old_price:
+            percent = (change.new_price - change.old_price) / change.old_price * 100
+            line += f" ({percent:+.1f}%)"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 class SubscriptionDialog(QDialog):
-    def __init__(self, parent=None, subscription: Subscription | None = None):
+    def __init__(self, parent=None, subscription: Subscription | None = None, price_history=()):
         super().__init__(parent)
         self._original = subscription
         self.setWindowTitle("Edit subscription" if subscription else "Add subscription")
@@ -74,10 +89,25 @@ class SubscriptionDialog(QDialog):
         trial_row.addWidget(self.trial_check)
         trial_row.addWidget(self.trial_edit, 1)
 
+        self.shared_spin = QSpinBox()
+        self.shared_spin.setRange(1, 50)
+        self.shared_spin.setSpecialValueText("Just me")
+        self.shared_spin.setSuffix(" people")
+        self.share_label = QLabel()
+        self.share_label.setStyleSheet("color: gray;")
+        shared_row = QHBoxLayout()
+        shared_row.addWidget(self.shared_spin)
+        shared_row.addWidget(self.share_label, 1)
+        for signal in (self.shared_spin.valueChanged, self.price_spin.valueChanged, self.currency_combo.currentIndexChanged):
+            signal.connect(self._update_share_label)
+
         self.rarely_used_check = QCheckBox("I rarely use this")
 
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setFixedHeight(60)
+
+        self.history_label = QLabel(describe_price_history(list(price_history)))
+        self.history_label.setStyleSheet("color: gray;")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -86,6 +116,9 @@ class SubscriptionDialog(QDialog):
         form = QFormLayout(self)
         form.addRow("Name", self.name_edit)
         form.addRow("Price", price_row)
+        if price_history:
+            form.addRow("Price changes", self.history_label)
+        form.addRow("Split between", shared_row)
         form.addRow("Billing cycle", self.cycle_combo)
         form.addRow("Category", self.category_combo)
         form.addRow("First payment", self.first_payment_edit)
@@ -96,6 +129,15 @@ class SubscriptionDialog(QDialog):
 
         if subscription:
             self._load(subscription)
+        self._update_share_label()
+
+    def _update_share_label(self) -> None:
+        people = self.shared_spin.value()
+        if people == 1:
+            self.share_label.setText("")
+            return
+        share = Decimal(f"{self.price_spin.value():.2f}") / people
+        self.share_label.setText(f"your share: {share:.2f} {self.currency_combo.currentText()} per payment")
 
     def _load(self, sub: Subscription) -> None:
         self.name_edit.setText(sub.name)
@@ -109,6 +151,7 @@ class SubscriptionDialog(QDialog):
             self.trial_edit.setDate(_to_qdate(sub.trial_end_date))
         self.rarely_used_check.setChecked(sub.rarely_used)
         self.notes_edit.setPlainText(sub.notes)
+        self.shared_spin.setValue(sub.shared_with)
 
     def subscription(self) -> Subscription:
         """The subscription as entered. Keeps the id and active flag when editing."""
@@ -126,4 +169,5 @@ class SubscriptionDialog(QDialog):
             trial_end_date=_from_qdate(self.trial_edit.date()) if self.trial_check.isChecked() else None,
             rarely_used=self.rarely_used_check.isChecked(),
             notes=self.notes_edit.toPlainText(),
+            shared_with=self.shared_spin.value(),
         )

@@ -77,12 +77,12 @@ def next_payment_date(sub: Subscription, today: date) -> date:
 
 
 def yearly_cost(sub: Subscription) -> Decimal:
-    """Cost over one year, in the subscription's own currency."""
-    return (sub.price * _CHARGES_PER_YEAR[sub.billing_cycle]).quantize(_CENT, ROUND_HALF_UP)
+    """The user's cost over one year (their share if shared), in the subscription's currency."""
+    return (sub.price * _CHARGES_PER_YEAR[sub.billing_cycle] / sub.shared_with).quantize(_CENT, ROUND_HALF_UP)
 
 
 def monthly_cost(sub: Subscription) -> Decimal:
-    """Average cost per month, in the subscription's own currency."""
-    return (sub.price * _CHARGES_PER_YEAR[sub.billing_cycle] / 12).quantize(
+    """The user's average cost per month (their share if shared), in the subscription's currency."""
+    return (sub.price * _CHARGES_PER_YEAR[sub.billing_cycle] / 12 / sub.shared_with).quantize(
         _CENT, ROUND_HALF_UP
     )

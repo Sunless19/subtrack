@@ -60,6 +60,20 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (subscription_id, due_date)
     );
     """,
+    # 4 - shared subscriptions and price history
+    """
+    ALTER TABLE subscriptions ADD COLUMN shared_with INTEGER NOT NULL DEFAULT 1;
+
+    CREATE TABLE price_changes (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+        changed_on      TEXT    NOT NULL,
+        old_price       TEXT    NOT NULL,
+        old_currency    TEXT    NOT NULL,
+        new_price       TEXT    NOT NULL,
+        new_currency    TEXT    NOT NULL
+    );
+    """,
 ]
 
 

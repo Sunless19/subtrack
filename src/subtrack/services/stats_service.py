@@ -47,7 +47,7 @@ class StatsService:
         end = today + timedelta(days=days)
         payments = []
         for sub in self._repo.list():
-            amount = self._currency.to_base(sub.price, sub.currency)
+            amount = self._currency.to_base(sub.my_share, sub.currency)
             due = billing.next_payment_date(sub, today)
             while due <= end:
                 payments.append(UpcomingPayment(due, sub, amount))

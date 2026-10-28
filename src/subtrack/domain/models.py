@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 
 
@@ -51,7 +51,27 @@ class Subscription:
     rarely_used: bool = False
     active: bool = True
     notes: str = ""
+    # People splitting the cost, including the user. 1 = not shared.
+    shared_with: int = 1
     id: int | None = None
 
     def is_trial(self, today: date) -> bool:
         return self.trial_end_date is not None and today <= self.trial_end_date
+
+    @property
+    def is_shared(self) -> bool:
+        return self.shared_with > 1
+
+    @property
+    def my_share(self) -> Decimal:
+        """The user's part of one payment."""
+        return (self.price / self.shared_with).quantize(Decimal("0.01"), ROUND_HALF_UP)
+
+
+@dataclass(frozen=True)
+class PriceChange:
+    changed_on: date
+    old_price: Decimal
+    old_currency: Currency
+    new_price: Decimal
+    new_currency: Currency

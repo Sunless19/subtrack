@@ -80,7 +80,12 @@ class RemindersView(QWidget):
         for row, entry in enumerate(self._entries):
             sub = entry.subscription
             what = "Free trial ends" if entry.is_trial_end else "Payment"
-            amount = "" if entry.is_trial_end else f"{sub.price:.2f} {sub.currency.value}"
+            if entry.is_trial_end:
+                amount = ""
+            elif sub.is_shared:
+                amount = f"{sub.my_share:.2f} of {sub.price:.2f} {sub.currency.value}"
+            else:
+                amount = f"{sub.price:.2f} {sub.currency.value}"
             status = entry.status.value + (f" {entry.detail}" if entry.detail else "")
             cells = [entry.date.strftime("%a %d %b %Y"), sub.name, what, amount, status]
             for column, text in enumerate(cells):

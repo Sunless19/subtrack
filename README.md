@@ -3,6 +3,35 @@
 Desktop application for managing personal subscriptions (Python + PySide6 + SQLite).
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and implementation status.
 
+## Features
+
+- Subscriptions with price, currency (RON / EUR / USD), billing cycle, category, free trial, notes
+- **Shared plans**: split the cost between N people; every total uses your share
+- **Price history**: price changes are recorded; the list shows ▲/▼ % since the first price
+- Totals per month and per year in one currency (manual exchange rates)
+- Dashboard: spending per category, payments due in the next 30 days
+- **Reminders** a few days before and on the payment day, as Windows notifications with
+  *Mark as paid*, *Remind me in 1 hour* and *Remind me tomorrow* buttons
+- Reminders tab: last and next 30 days of payments with their status
+- Search, category filter, sort by any column (money sorts across currencies), show/reactivate cancelled
+- Export to CSV (Excel), JSON (backup) and **.ics calendar** (Google Calendar, Outlook); import CSV / JSON
+- Runs in the tray, optional start with Windows, all data stays on your PC
+
+## Roadmap
+
+Ideas from comparable apps (Wallos, Bobby, Chronicle, ReSubs, TrackMySubs), not built yet:
+
+| Idea | Why |
+|------|-----|
+| Contract end date / notice period, with a "cancel by" reminder | Frequent request (Wallos #986, #352) |
+| Catch-up for reminders missed while the PC was off | Missed reminders are the top complaint about Bobby |
+| Payment method field and filter | TrackMySubs, ReSubs, Subscriptions have it |
+| Spend over time: total paid per subscription, yearly trend chart | Subby, Wallos |
+| 12-month forecast / calendar view | TrackMySubs, Chronicle |
+| Pause / skip a cycle; promo price that ends on a date | Bobby reviews, Wallos #535 |
+| Templates and icons for common services | Bobby, ReSubs, Subscriptions |
+| Optional online exchange rates and logo lookup | Needs internet, so opt-in only |
+
 ## Setup
 
 ```powershell

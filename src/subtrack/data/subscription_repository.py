@@ -1,15 +1,19 @@
-"""Maps Subscription objects to and from the subscriptions table."""
+"""Maps Subscription objects to and from the subscriptions table (and their price history)."""
+
+# Annotations are evaluated lazily: the class has a method named `list`, which would
+# otherwise shadow the built-in in its own type hints.
+from __future__ import annotations
 
 import sqlite3
 from datetime import date
 from decimal import Decimal
 
 from subtrack.data.database import Database
-from subtrack.domain.models import BillingCycle, Category, Currency, Subscription
+from subtrack.domain.models import BillingCycle, Category, Currency, PriceChange, Subscription
 
 _COLUMNS = (
     "name, price, currency, billing_cycle, first_payment_date, category, "
-    "trial_end_date, rarely_used, active, notes"
+    "trial_end_date, rarely_used, active, notes, shared_with"
 )
 
 
@@ -25,6 +29,7 @@ def _to_row(sub: Subscription) -> tuple:
         int(sub.rarely_used),
         int(sub.active),
         sub.notes,
+        sub.shared_with,
     )
 
 
@@ -41,6 +46,7 @@ def _from_row(row: sqlite3.Row) -> Subscription:
         rarely_used=bool(row["rarely_used"]),
         active=bool(row["active"]),
         notes=row["notes"],
+        shared_with=row["shared_with"],
     )
 
 
@@ -63,7 +69,7 @@ class SubscriptionRepository:
         """Insert and return the subscription with its new id set."""
         with self._conn:
             cursor = self._conn.execute(
-                f"INSERT INTO subscriptions ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO subscriptions ({_COLUMNS}) VALUES ({', '.join('?' * len(_COLUMNS.split(',')))})",
                 _to_row(sub),
             )
         sub.id = cursor.lastrowid
@@ -82,3 +88,41 @@ class SubscriptionRepository:
     def delete(self, sub_id: int) -> None:
         with self._conn:
             self._conn.execute("DELETE FROM subscriptions WHERE id = ?", (sub_id,))
+
+    # ---- price history ------------------------------------------------------
+
+    def add_price_change(self, sub_id: int, change: PriceChange) -> None:
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO price_changes "
+                "(subscription_id, changed_on, old_price, old_currency, new_price, new_currency) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    sub_id,
+                    change.changed_on.isoformat(),
+                    str(change.old_price),
+                    change.old_currency.value,
+                    str(change.new_price),
+                    change.new_currency.value,
+                ),
+            )
+
+    def price_changes(self, sub_id: int | None = None) -> dict[int, list[PriceChange]]:
+        """subscription id -> its price changes, oldest first."""
+        sql = "SELECT * FROM price_changes"
+        params: tuple = ()
+        if sub_id is not None:
+            sql += " WHERE subscription_id = ?"
+            params = (sub_id,)
+        result: dict[int, list[PriceChange]] = {}
+        for row in self._conn.execute(sql + " ORDER BY changed_on, id", params):
+            result.setdefault(row["subscription_id"], []).append(
+                PriceChange(
+                    changed_on=date.fromisoformat(row["changed_on"]),
+                    old_price=Decimal(row["old_price"]),
+                    old_currency=Currency(row["old_currency"]),
+                    new_price=Decimal(row["new_price"]),
+                    new_currency=Currency(row["new_currency"]),
+                )
+            )
+        return result

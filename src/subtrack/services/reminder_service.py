@@ -60,8 +60,9 @@ class Reminder:
         price = f"{sub.price:.2f} {sub.currency.value}"
         if self.kind is ReminderKind.TRIAL_ENDING:
             return f"The free trial ends {_when(self.due_date, today)}. Cancel before then to avoid paying {price}."
+        share = f" Your share: {sub.my_share:.2f} {sub.currency.value}." if sub.is_shared else ""
         hint = " You marked it as rarely used." if sub.rarely_used else ""
-        return f"{price} will be charged {_when(self.due_date, today)}.{hint}"
+        return f"{price} will be charged {_when(self.due_date, today)}.{share}{hint}"
 
 
 class TimelineStatus(Enum):

@@ -1,4 +1,5 @@
-"""Export / import of subscriptions as CSV (for spreadsheets) or JSON (for backups).
+"""Export / import of subscriptions as CSV (for spreadsheets) or JSON (for backups),
+plus export of upcoming payments as a calendar file (.ics, export only).
 
 Both formats contain every subscription, including cancelled ones. Imports are
 all-or-nothing: every entry is parsed and validated before anything is saved,
@@ -14,6 +15,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from subtrack.domain.models import BillingCycle, Category, Currency, Subscription
+from subtrack.services.calendar_export import build_calendar
 from subtrack.services.subscription_service import SubscriptionService, ValidationError
 
 FORMAT_VERSION = 1
@@ -29,6 +31,7 @@ FIELDS = [
     "rarely_used",
     "active",
     "notes",
+    "shared_with",
 ]
 # Written to CSV for convenience; ignored on import because it is always computed.
 CSV_EXTRA_FIELDS = ["next_payment_date"]
@@ -56,6 +59,7 @@ def _to_record(sub: Subscription) -> dict:
         "rarely_used": sub.rarely_used,
         "active": sub.active,
         "notes": sub.notes,
+        "shared_with": sub.shared_with,
     }
 
 
@@ -91,6 +95,9 @@ def _from_record(record: dict) -> Subscription:
     except InvalidOperation:
         raise ValueError(f"price '{record['price']}' is not a number") from None
     trial = str(record.get("trial_end_date") or "").strip()
+    shared = str(record.get("shared_with") or "").strip()  # missing in files from v0.1
+    if shared and not shared.isdigit():
+        raise ValueError(f"shared_with '{shared}' is not a whole number")
     return Subscription(
         name=str(record["name"]),
         price=price,
@@ -102,6 +109,7 @@ def _from_record(record: dict) -> Subscription:
         rarely_used=_parse_bool(record.get("rarely_used", ""), default=False),
         active=_parse_bool(record.get("active", ""), default=True),
         notes=str(record.get("notes") or ""),
+        shared_with=int(shared) if shared else 1,
     )
 
 
@@ -141,6 +149,17 @@ class ExportService:
         with open(path, "w", encoding="utf-8") as file:
             json.dump(document, file, ensure_ascii=False, indent=2)
         return len(rows)
+
+    def export_ics(self, path: Path, today: date | None = None, months: int = 12) -> int:
+        """Calendar file with every payment of active subscriptions in the next `months`.
+
+        Returns the number of payment events written.
+        """
+        active = [row.subscription for row in self._subscriptions.list_rows()]
+        text, count = build_calendar(active, today or date.today(), months)
+        with open(path, "w", encoding="utf-8", newline="") as file:
+            file.write(text)
+        return count
 
     # ---- import ---------------------------------------------------------
 

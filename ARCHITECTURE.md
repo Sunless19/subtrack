@@ -83,6 +83,7 @@ subtrack/
 │  │  ├─ currency_service.py
 │  │  ├─ reminder_service.py
 │  │  ├─ export_service.py
+│  │  ├─ calendar_export.py    .ics file of upcoming payments
 │  │  └─ autostart_service.py  registry Run key (start with Windows)
 │  └─ ui/
 │     ├─ main_window.py
@@ -104,7 +105,8 @@ subtrack/
    ├─ test_reminder_service.py
    ├─ test_export_service.py
    ├─ test_autostart_service.py
-   └─ test_notifications.py   tray + notification actions, v0.1 → v0.2 upgrade
+   ├─ test_notifications.py   tray + notification actions, v0.1 → v0.2 upgrade
+   └─ test_v02_features.py    shared costs, price history, .ics, search/filter/sort
 ```
 
 ---
@@ -195,8 +197,32 @@ CREATE TABLE payments (
 );
 ```
 
+### Migration 4 (v0.2)
+
+```sql
+-- shared subscriptions: people splitting the cost, including the user
+ALTER TABLE subscriptions ADD COLUMN shared_with INTEGER NOT NULL DEFAULT 1;
+
+-- price history, written by SubscriptionService.update when price or currency changes
+CREATE TABLE price_changes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+    changed_on      TEXT NOT NULL,
+    old_price       TEXT NOT NULL,
+    old_currency    TEXT NOT NULL,
+    new_price       TEXT NOT NULL,
+    new_currency    TEXT NOT NULL
+);
+```
+
 Migrations are numbered and tracked with `PRAGMA user_version`. A test opens a
 database made by v0.1 and checks that it upgrades without losing data.
+
+### Shared costs
+
+`price` is always the full price that gets charged. `my_share = price / shared_with`.
+Every total (monthly, yearly, per category, upcoming 30 days) uses the user's
+share; reminders and the calendar show both ("60.00 RON … Your share: 20.00 RON").
 
 ---
 
@@ -208,7 +234,8 @@ database made by v0.1 and checks that it upgrades without losing data.
 | `CurrencyService`     | convert any amount to the base currency using the manual rates        |
 | `StatsService`        | monthly & yearly totals, totals per category, upcoming payments       |
 | `ReminderService`     | due reminders (early, day-of, trial ending), snooze, mark paid, Reminders-tab timeline |
-| `ExportService`       | export to CSV / JSON, import CSV / JSON (all-or-nothing, skips duplicates) |
+| `ExportService`       | export to CSV / JSON / .ics calendar, import CSV / JSON (all-or-nothing, skips duplicates) |
+| `calendar_export`     | builds the .ics (RFC 5545): one all-day event per payment for 12 months, alarm the day before, stable UIDs |
 | `AutostartService`    | start with Windows via `HKCU\…\CurrentVersion\Run`, launches `--minimized` |
 
 ---
@@ -261,6 +288,15 @@ Every row is parsed and validated first; one bad row means nothing is
 imported, and the error names the row. Rows identical to an existing
 subscription (same name, price, currency, cycle, first date) are skipped.
 
+**Subscriptions list**
+`SubscriptionTableModel` holds every subscription (cancelled included);
+`SubscriptionFilterModel` (a `QSortFilterProxyModel`) applies the search box
+(every word must appear in name, category or notes), the category filter and
+"Show cancelled", and sorts on a separate role so money columns sort by their
+value in the base currency. The status bar shows "Showing N of M · X/month"
+while a filter is active. The price column shows ▲/▼ % since the first
+recorded price; Edit lists every change.
+
 **Adding a subscription**
 `SubscriptionDialog` → `SubscriptionService.add()` (validates) →
 `SubscriptionRepository.insert()` → table model refreshes → totals update.
@@ -286,6 +322,10 @@ subscription (same name, price, currency, cycle, first date) are skipped.
 | System tray, close-to-tray             | ✅ done         |
 | Windows toasts with buttons            | ✅ done; delivery confirmed, button click to be confirmed by hand |
 | Export / import (CSV / JSON)           | ✅ done, tested |
+| Calendar export (.ics)                 | ✅ done, tested |
+| Shared subscriptions (my share)        | ✅ done, tested |
+| Price-change history                   | ✅ done, tested |
+| Search / filter / sort, reactivate     | ✅ done, tested |
 | Start with Windows                     | ✅ done, tested (fake registry) |
 | Single instance (second launch shows the window) | ✅ done |
 | Packaging as .exe (PyInstaller)        | ✅ done, built and smoke-tested locally |
