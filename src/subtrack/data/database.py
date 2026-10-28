@@ -46,6 +46,20 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (subscription_id, kind, due_date)
     );
     """,
+    # 3 - snoozing reminders and marking payments as paid
+    """
+    ALTER TABLE shown_reminders ADD COLUMN shown_at TEXT;
+    ALTER TABLE shown_reminders ADD COLUMN snoozed_until TEXT;
+    -- Rows from v0.1 were shown but have no time; use their due date so they are not shown again.
+    UPDATE shown_reminders SET shown_at = due_date || 'T00:00:00';
+
+    CREATE TABLE payments (
+        subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+        due_date        TEXT    NOT NULL,
+        paid_at         TEXT    NOT NULL,
+        PRIMARY KEY (subscription_id, due_date)
+    );
+    """,
 ]
 
 

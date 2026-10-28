@@ -69,6 +69,14 @@ try {
     if (-not $alive) { throw "SubTrack.exe exited early with code $($process.ExitCode)" }
     if (-not (Test-Path "$smokeData\SubTrack\subtrack.db")) { throw "SubTrack.exe did not create its database" }
     Write-Host "OK: the app started and created its database"
+
+    # Checks that Qt Charts and the native notification library made it into the package.
+    $selfTest = Start-Process -FilePath $exe -ArgumentList "--self-test" -PassThru -Wait
+    if ($selfTest.ExitCode -ne 0) {
+        Get-Content "$smokeData\SubTrack\subtrack.log" -ErrorAction SilentlyContinue | Write-Host
+        throw "SubTrack.exe --self-test failed (exit code $($selfTest.ExitCode))"
+    }
+    Write-Host "OK: self-test passed (charts and Windows notifications load)"
 }
 finally {
     $env:APPDATA = $oldAppData

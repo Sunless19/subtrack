@@ -18,13 +18,14 @@ trial expirations, and shows how much they spend per month and per year.
 ```
 ┌──────────────────────────────────────────────────────────┐
 │ UI (PySide6)                                             │
-│  MainWindow · SubscriptionDialog · DashboardView · Tray  │
+│  MainWindow: Subscriptions · Dashboard · Reminders tabs  │
+│  SubscriptionDialog · SettingsDialog · Tray · Notifier   │
 └───────────────▲──────────────────────────────────────────┘
                 │ calls services, never touches SQL
 ┌───────────────┴──────────────────────────────────────────┐
 │ Services (application logic)                             │
 │  SubscriptionService · StatsService · ReminderService    │
-│  CurrencyService · ExportService · SettingsService       │
+│  CurrencyService · ExportService · AutostartService      │
 └───────────────▲──────────────────────────────────────────┘
                 │ uses repositories + pure domain functions
 ┌───────────────┴──────────────────────────────────────────┐
@@ -66,7 +67,7 @@ subtrack/
 ├─ src/subtrack/
 │  ├─ __main__.py              entry point: python -m subtrack
 │  ├─ app.py                   composition root, starts Qt
-│  ├─ paths.py                 where the DB / exports live
+│  ├─ paths.py                 where the DB, log and notification icon live
 │  ├─ domain/
 │  │  ├─ models.py             dataclasses + enums
 │  │  └─ billing.py            date & cost calculations
@@ -74,7 +75,8 @@ subtrack/
 │  │  ├─ database.py           sqlite connection + schema migrations
 │  │  ├─ subscription_repository.py
 │  │  ├─ settings_repository.py
-│  │  └─ reminder_repository.py   which reminders were already shown
+│  │  ├─ reminder_repository.py   which reminders were shown / snoozed
+│  │  └─ payment_repository.py    payments marked as paid
 │  ├─ services/
 │  │  ├─ subscription_service.py
 │  │  ├─ stats_service.py
@@ -88,9 +90,11 @@ subtrack/
 │     ├─ subscription_dialog.py
 │     ├─ settings_dialog.py
 │     ├─ dashboard_view.py
+│     ├─ reminders_view.py     Reminders tab: past/upcoming payments, mark paid
+│     ├─ notifier.py           Windows toasts with buttons (fallback: tray balloons)
 │     ├─ icon.py               app icon drawn in code
-│     ├─ single_instance.py    one running copy; mutex for the installer
-│     └─ tray.py
+│     ├─ single_instance.py    one running copy per data folder; installer mutex
+│     └─ tray.py               tray icon, reminder checks, notification button actions
 └─ tests/
    ├─ conftest.py
    ├─ test_billing.py
@@ -99,7 +103,8 @@ subtrack/
    ├─ test_currency_and_stats.py
    ├─ test_reminder_service.py
    ├─ test_export_service.py
-   └─ test_autostart_service.py
+   ├─ test_autostart_service.py
+   └─ test_notifications.py   tray + notification actions, v0.1 → v0.2 upgrade
 ```
 
 ---
@@ -173,7 +178,25 @@ CREATE TABLE shown_reminders (
 );
 ```
 
-Migrations are numbered and tracked with `PRAGMA user_version`.
+### Migration 3 (v0.2)
+
+```sql
+-- snoozing, and when a reminder was shown
+ALTER TABLE shown_reminders ADD COLUMN shown_at TEXT;
+ALTER TABLE shown_reminders ADD COLUMN snoozed_until TEXT;
+UPDATE shown_reminders SET shown_at = due_date || 'T00:00:00';  -- v0.1 rows count as shown
+
+-- payments the user marked as paid
+CREATE TABLE payments (
+    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+    due_date        TEXT    NOT NULL,
+    paid_at         TEXT    NOT NULL,
+    PRIMARY KEY (subscription_id, due_date)
+);
+```
+
+Migrations are numbered and tracked with `PRAGMA user_version`. A test opens a
+database made by v0.1 and checks that it upgrades without losing data.
 
 ---
 
@@ -184,7 +207,7 @@ Migrations are numbered and tracked with `PRAGMA user_version`.
 | `SubscriptionService` | add / edit / cancel / delete, validation, list with next payment date |
 | `CurrencyService`     | convert any amount to the base currency using the manual rates        |
 | `StatsService`        | monthly & yearly totals, totals per category, upcoming payments       |
-| `ReminderService`     | which payments / trials fall inside the reminder window today         |
+| `ReminderService`     | due reminders (early, day-of, trial ending), snooze, mark paid, Reminders-tab timeline |
 | `ExportService`       | export to CSV / JSON, import CSV / JSON (all-or-nothing, skips duplicates) |
 | `AutostartService`    | start with Windows via `HKCU\…\CurrentVersion\Run`, launches `--minimized` |
 
@@ -196,8 +219,33 @@ Migrations are numbered and tracked with `PRAGMA user_version`.
 1. `paths.py` resolves `%APPDATA%\SubTrack\subtrack.db`.
 2. `Database` opens it and runs pending migrations.
 3. Repositories → services → `MainWindow` and `TrayIcon` are created.
-4. `ReminderService` is checked once at startup and then every hour by a
-   `QTimer`; due items become Windows toast notifications via the tray icon.
+4. The tray asks `ReminderService` for due reminders at startup and then every
+   5 minutes; each becomes a notification (see below).
+
+**Reminders**
+- Each payment gets up to two reminders: *payment coming up* N days before
+  (Settings, default 3) and *payment due today* on the day. Free trials get
+  *free trial ending*. Each is shown once.
+- On Windows the notification is a native toast with **Mark as paid**,
+  **Remind me in 1 hour** and **Remind me tomorrow** (09:00). The day-of toast
+  uses the "reminder" style, which stays on screen until acted on. Clicking the
+  body opens the Reminders tab. If native toasts are unavailable, plain tray
+  balloons (no buttons) are used.
+- Button clicks arrive on a Windows thread; `Notifier.action_requested` (a Qt
+  signal) moves them to the main thread, where `TrayIcon.handle_action` calls
+  `ReminderService.mark_paid` / `snooze`.
+- Buttons only work for a registered app identity, so at startup the app writes
+  `HKCU\Software\Classes\AppUserModelId\SubTrack.App` (name + icon; per user,
+  no admin). The installer removes it on uninstall.
+- More than 4 reminders at once are combined into one summary notification.
+- The **Reminders** tab lists every payment and trial end from 30 days back to
+  30 days ahead with its status (Paid, Reminded, Snoozed, Due today, Upcoming,
+  Not marked as paid); payments can be marked paid or unmarked there.
+
+**Logging and self-test**
+The app logs to `%APPDATA%\SubTrack\subtrack.log` (rotated at 500 KB), since
+the .exe has no console. `SubTrack.exe --self-test` checks that Qt Charts and
+the notification library load inside the package; `build.ps1` runs it.
 
 **Closing the window** hides it to the tray instead of quitting, so reminders
 keep working. "Quit" in the tray menu exits the app.
@@ -232,15 +280,17 @@ subscription (same name, price, currency, cycle, first date) are skipped.
 | Settings repository + settings dialog  | ✅ done, tested |
 | CurrencyService                        | ✅ done, tested |
 | StatsService                           | ✅ done, tested |
-| ReminderService (shown once each)      | ✅ done, tested |
+| ReminderService (early + day-of, snooze, paid) | ✅ done, tested |
 | Dashboard: totals, pie chart, upcoming | ✅ done         |
-| System tray, notifications, close-to-tray | ✅ done      |
+| Reminders tab (timeline, mark paid)    | ✅ done         |
+| System tray, close-to-tray             | ✅ done         |
+| Windows toasts with buttons            | ✅ done; delivery confirmed, button click to be confirmed by hand |
 | Export / import (CSV / JSON)           | ✅ done, tested |
 | Start with Windows                     | ✅ done, tested (fake registry) |
 | Single instance (second launch shows the window) | ✅ done |
 | Packaging as .exe (PyInstaller)        | ✅ done, built and smoke-tested locally |
-| Installer (Inno Setup)                 | ✅ script written; built only in CI so far |
-| CI + GitHub Releases (GitHub Actions)  | ✅ workflow written; not run yet (no repo) |
+| Installer (Inno Setup)                 | ✅ built in CI |
+| CI + GitHub Releases (GitHub Actions)  | ✅ running; v0.1.0 released |
 
 ---
 

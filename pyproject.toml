@@ -7,7 +7,7 @@ name = "subtrack"
 dynamic = ["version"]
 description = "Desktop application for managing personal subscriptions"
 requires-python = ">=3.11"
-dependencies = ["PySide6>=6.7"]
+dependencies = ["PySide6>=6.7", "windows-toasts>=1.3; sys_platform == 'win32'"]
 
 [tool.setuptools.dynamic]
 # Single source of truth for the version: src/subtrack/__init__.py.

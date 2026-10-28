@@ -1,4 +1,4 @@
-"""Main window: subscription list with add / edit / delete, and a dashboard tab."""
+"""Main window: subscription list with add / edit / delete, plus Dashboard and Reminders tabs."""
 
 from datetime import date
 from pathlib import Path
@@ -22,9 +22,11 @@ from subtrack.data.settings_repository import SettingsRepository
 from subtrack.services.autostart_service import AutostartService
 from subtrack.services.currency_service import CurrencyService
 from subtrack.services.export_service import ExportService, ImportFailed
+from subtrack.services.reminder_service import ReminderService
 from subtrack.services.stats_service import StatsService
 from subtrack.services.subscription_service import SubscriptionService, ValidationError
 from subtrack.ui.dashboard_view import DashboardView
+from subtrack.ui.reminders_view import RemindersView
 from subtrack.ui.settings_dialog import SettingsDialog
 from subtrack.ui.subscription_dialog import SubscriptionDialog
 from subtrack.ui.subscription_table_model import SubscriptionTableModel
@@ -41,6 +43,7 @@ class MainWindow(QMainWindow):
         settings: SettingsRepository,
         exporter: ExportService,
         autostart: AutostartService,
+        reminders: ReminderService,
     ):
         super().__init__()
         self._subscriptions = subscriptions
@@ -66,10 +69,13 @@ class MainWindow(QMainWindow):
         self.table.selectionModel().selectionChanged.connect(self._update_actions)
 
         self.dashboard = DashboardView(stats, currency)
-        tabs = QTabWidget()
-        tabs.addTab(self.table, "Subscriptions")
-        tabs.addTab(self.dashboard, "Dashboard")
-        self.setCentralWidget(tabs)
+        self.reminders_view = RemindersView(reminders)
+        self.reminders_view.changed.connect(self.refresh)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.table, "Subscriptions")
+        self.tabs.addTab(self.dashboard, "Dashboard")
+        self.tabs.addTab(self.reminders_view, "Reminders")
+        self.setCentralWidget(self.tabs)
 
         self.add_action = QAction("Add", self, shortcut=QKeySequence.New, triggered=self.add)
         self.edit_action = QAction("Edit", self, triggered=self.edit_selected)
@@ -101,7 +107,11 @@ class MainWindow(QMainWindow):
             f"Yearly: {self._stats.yearly_total():.2f} {base}"
         )
         self.dashboard.refresh()
+        self.reminders_view.refresh()
         self._update_actions()
+
+    def show_reminders_tab(self) -> None:
+        self.tabs.setCurrentWidget(self.reminders_view)
 
     def closeEvent(self, event) -> None:
         if self.hide_on_close:

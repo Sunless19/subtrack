@@ -16,3 +16,7 @@ def data_dir() -> Path:
 
 def database_path() -> Path:
     return data_dir() / "subtrack.db"
+
+
+def log_path() -> Path:
+    return data_dir() / "subtrack.log"

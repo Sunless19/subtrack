@@ -1,3 +1,4 @@
 # Pinned so local builds and CI produce the same app.
 PySide6==6.12.0
+windows-toasts==1.3.1; sys_platform == "win32"
 pytest==9.1.1

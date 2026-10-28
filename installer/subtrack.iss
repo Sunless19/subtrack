@@ -64,6 +64,9 @@ Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#AppName}"; \
     ValueData: """{app}\{#AppExe}"" --minimized"; Tasks: autostart
 ; Always remove the startup entry on uninstall, even if it was turned on from inside the app.
 Root: HKCU; Subkey: "{#RunKey}"; ValueType: none; ValueName: "{#AppName}"; Flags: uninsdeletevalue
+; The app registers this notification identity (name + icon) itself; remove it on uninstall.
+; Must match APP_ID in src\subtrack\ui\notifier.py.
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\SubTrack.App"; ValueType: none; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent

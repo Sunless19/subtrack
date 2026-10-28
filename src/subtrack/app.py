@@ -1,11 +1,14 @@
 """Composition root: builds the database, repositories, services and windows."""
 
+import logging
+import logging.handlers
 import sys
 
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from subtrack import __version__, paths
 from subtrack.data.database import Database
+from subtrack.data.payment_repository import PaymentRepository
 from subtrack.data.reminder_repository import ReminderRepository
 from subtrack.data.settings_repository import SettingsRepository
 from subtrack.data.subscription_repository import SubscriptionRepository
@@ -17,8 +20,41 @@ from subtrack.services.stats_service import StatsService
 from subtrack.services.subscription_service import SubscriptionService
 from subtrack.ui.icon import app_icon
 from subtrack.ui.main_window import MainWindow
+from subtrack.ui.notifier import set_process_app_id
 from subtrack.ui.single_instance import InstanceServer, notify_running_instance
 from subtrack.ui.tray import TrayIcon
+
+
+def _setup_logging() -> None:
+    """Log to %APPDATA%\\SubTrack\\subtrack.log (the packaged .exe has no console). Kept under ~1 MB."""
+    handler = logging.handlers.RotatingFileHandler(
+        paths.log_path(), maxBytes=500_000, backupCount=1, encoding="utf-8"
+    )
+    logging.basicConfig(
+        level=logging.INFO, handlers=[handler], format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    logging.getLogger(__name__).info("SubTrack %s starting", __version__)
+
+
+def _self_test() -> int:
+    """Used by build.ps1 on the packaged .exe: can it load Qt Charts and native notifications?
+
+    Shows nothing and changes nothing. Exit code 0 = OK; details go to the log.
+    """
+    log = logging.getLogger(__name__)
+    try:
+        from PySide6.QtCharts import QChart  # noqa: F401
+
+        if sys.platform == "win32":
+            from subtrack.ui.notifier import ToastNotifier
+
+            app = QApplication(sys.argv)  # noqa: F841 - QObject needs an application
+            ToastNotifier(register=False)
+    except Exception:
+        log.exception("Self-test failed")
+        return 1
+    log.info("Self-test passed")
+    return 0
 
 
 def run() -> int:
@@ -26,7 +62,11 @@ def run() -> int:
         print(f"SubTrack {__version__}")
         return 0
     minimized = "--minimized" in sys.argv
+    _setup_logging()
+    if "--self-test" in sys.argv:
+        return _self_test()
 
+    set_process_app_id()  # before any window exists, so Windows ties them to SubTrack
     app = QApplication(sys.argv)
     app.setApplicationName(paths.APP_NAME)
     app.setApplicationVersion(__version__)
@@ -44,11 +84,11 @@ def run() -> int:
     currency = CurrencyService(settings)
     subscriptions = SubscriptionService(subscription_repo)
     stats = StatsService(subscription_repo, currency)
-    reminders = ReminderService(subscription_repo, ReminderRepository(db), settings)
+    reminders = ReminderService(subscription_repo, ReminderRepository(db), settings, PaymentRepository(db))
     exporter = ExportService(subscriptions)
     autostart = AutostartService()
 
-    window = MainWindow(subscriptions, stats, currency, settings, exporter, autostart)
+    window = MainWindow(subscriptions, stats, currency, settings, exporter, autostart, reminders)
 
     tray = None
     if QSystemTrayIcon.isSystemTrayAvailable():
