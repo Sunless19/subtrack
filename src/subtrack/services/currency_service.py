@@ -4,6 +4,7 @@ Rates are stored in RON (rate_EUR = 4.97 means 1 EUR = 4.97 RON), so the base
 currency can be changed without re-entering rates.
 """
 
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from subtrack.data.settings_repository import SettingsRepository
@@ -33,6 +34,16 @@ class CurrencyService:
         if rate <= 0:
             raise ValueError("Exchange rate must be positive")
         self._settings.set(f"rate_{currency.value}", str(rate))
+
+    def apply_online_rates(self, rates: dict[Currency, Decimal], as_of: date) -> None:
+        for currency, rate in rates.items():
+            self.set_rate_in_ron(currency, rate)
+        self._settings.set("rates_updated_on", as_of.isoformat())
+
+    def rates_updated_on(self) -> date | None:
+        """Date of the last online update, or None if the rates were only ever typed in."""
+        value = self._settings.get("rates_updated_on")
+        return date.fromisoformat(value) if value else None
 
     def convert(self, amount: Decimal, source: Currency, target: Currency) -> Decimal:
         if source is target:

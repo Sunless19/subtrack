@@ -32,6 +32,13 @@ FIELDS = [
     "active",
     "notes",
     "shared_with",
+    "payment_method",
+    "contract_end_date",
+    "notice_days",
+    "paused_from",
+    "paused_until",
+    "promo_price",
+    "promo_until",
 ]
 # Written to CSV for convenience; ignored on import because it is always computed.
 CSV_EXTRA_FIELDS = ["next_payment_date"]
@@ -60,7 +67,36 @@ def _to_record(sub: Subscription) -> dict:
         "active": sub.active,
         "notes": sub.notes,
         "shared_with": sub.shared_with,
+        "payment_method": sub.payment_method,
+        "contract_end_date": _iso(sub.contract_end_date),
+        "notice_days": sub.notice_days,
+        "paused_from": _iso(sub.paused_from),
+        "paused_until": _iso(sub.paused_until),
+        "promo_price": str(sub.promo_price) if sub.promo_price is not None else "",
+        "promo_until": _iso(sub.promo_until),
     }
+
+
+def _iso(value: date | None) -> str:
+    return value.isoformat() if value else ""
+
+
+def _optional_date(record: dict, field: str) -> date | None:
+    text = str(record.get(field) or "").strip()
+    try:
+        return date.fromisoformat(text) if text else None
+    except ValueError:
+        raise ValueError(f"{field} '{text}' is not a date (YYYY-MM-DD)") from None
+
+
+def _whole_number(record: dict, field: str, default: int) -> int:
+    """Fields added in later versions are missing from older files; they get the default."""
+    text = str(record.get(field) if record.get(field) is not None else "").strip()
+    if not text:
+        return default
+    if not text.isdigit():
+        raise ValueError(f"{field} '{text}' is not a whole number")
+    return int(text)
 
 
 def _parse_bool(value, default: bool) -> bool:
@@ -95,9 +131,11 @@ def _from_record(record: dict) -> Subscription:
     except InvalidOperation:
         raise ValueError(f"price '{record['price']}' is not a number") from None
     trial = str(record.get("trial_end_date") or "").strip()
-    shared = str(record.get("shared_with") or "").strip()  # missing in files from v0.1
-    if shared and not shared.isdigit():
-        raise ValueError(f"shared_with '{shared}' is not a whole number")
+    promo_text = str(record.get("promo_price") or "").strip()
+    try:
+        promo_price = Decimal(promo_text.replace(",", ".")) if promo_text else None
+    except InvalidOperation:
+        raise ValueError(f"promo_price '{promo_text}' is not a number") from None
     return Subscription(
         name=str(record["name"]),
         price=price,
@@ -109,7 +147,14 @@ def _from_record(record: dict) -> Subscription:
         rarely_used=_parse_bool(record.get("rarely_used", ""), default=False),
         active=_parse_bool(record.get("active", ""), default=True),
         notes=str(record.get("notes") or ""),
-        shared_with=int(shared) if shared else 1,
+        shared_with=_whole_number(record, "shared_with", 1),
+        payment_method=str(record.get("payment_method") or ""),
+        contract_end_date=_optional_date(record, "contract_end_date"),
+        notice_days=_whole_number(record, "notice_days", 0),
+        paused_from=_optional_date(record, "paused_from"),
+        paused_until=_optional_date(record, "paused_until"),
+        promo_price=promo_price,
+        promo_until=_optional_date(record, "promo_until"),
     )
 
 

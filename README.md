@@ -6,31 +6,38 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and implementation status.
 ## Features
 
 - Subscriptions with price, currency (RON / EUR / USD), billing cycle, category, free trial, notes
+- **Templates** for ~60 common services (Netflix, Spotify, Microsoft 365, …): type the name and
+  category and billing cycle fill in; coloured letter badges next to every name
 - **Shared plans**: split the cost between N people; every total uses your share
 - **Price history**: price changes are recorded; the list shows ▲/▼ % since the first price
-- Totals per month and per year in one currency (manual exchange rates)
-- Dashboard: spending per category, payments due in the next 30 days
+- **Introductory prices** that end on a date, then switch to the regular price
+- **Contracts**: end date and notice period, with a "last day to cancel" reminder
+- **Pause** between two dates, or **skip** just the next payment
+- **Payment method** per subscription, with a filter
+- Totals per month and per year in one currency; exchange rates typed in or **fetched online** (opt-in, ECB rates)
+- Dashboard: spending per category, **last 12 months and 12-month forecast**, payments due in the next 30 days;
+  **spent so far** per subscription in the list
 - **Reminders** a few days before and on the payment day, as Windows notifications with
-  *Mark as paid*, *Remind me in 1 hour* and *Remind me tomorrow* buttons
-- Reminders tab: last and next 30 days of payments with their status
-- Search, category filter, sort by any column (money sorts across currencies), show/reactivate cancelled
+  *Mark as paid*, *Remind me in 1 hour* and *Remind me tomorrow* buttons; payments that fell due
+  while the PC was off are caught up on at the next start
+- Reminders tab: last and next 30 days of payments, contract deadlines and price changes, with their status
+- Search, category and payment-method filters, sort by any column (money sorts across currencies), show/reactivate cancelled
 - Export to CSV (Excel), JSON (backup) and **.ics calendar** (Google Calendar, Outlook); import CSV / JSON
 - Runs in the tray, optional start with Windows, all data stays on your PC
 
 ## Roadmap
 
-Ideas from comparable apps (Wallos, Bobby, Chronicle, ReSubs, TrackMySubs), not built yet:
+Every idea from the comparison with similar apps (Wallos, Bobby, Chronicle, ReSubs, TrackMySubs)
+is built, except **automatic logo lookup**: it would download third-party brand logos (trademark
+and privacy concerns), so SubTrack draws its own letter badges instead.
 
-| Idea | Why |
-|------|-----|
-| Contract end date / notice period, with a "cancel by" reminder | Frequent request (Wallos #986, #352) |
-| Catch-up for reminders missed while the PC was off | Missed reminders are the top complaint about Bobby |
-| Payment method field and filter | TrackMySubs, ReSubs, Subscriptions have it |
-| Spend over time: total paid per subscription, yearly trend chart | Subby, Wallos |
-| 12-month forecast / calendar view | TrackMySubs, Chronicle |
-| Pause / skip a cycle; promo price that ends on a date | Bobby reviews, Wallos #535 |
-| Templates and icons for common services | Bobby, ReSubs, Subscriptions |
-| Optional online exchange rates and logo lookup | Needs internet, so opt-in only |
+Possible next steps:
+
+| Idea | Note |
+|------|------|
+| Multiple tags per subscription | Wallos #855 |
+| Variable amounts (e.g. utility bills) | Wallos #1141 |
+| Web or phone version | See "Web version" in ARCHITECTURE.md |
 
 ## Setup
 

@@ -37,15 +37,6 @@ def _fold(line: str) -> str:
     return "\r\n ".join(parts)
 
 
-def payment_dates(sub: Subscription, start: date, end: date) -> list[date]:
-    dates = []
-    due = billing.next_payment_date(sub, start)
-    while due <= end:
-        dates.append(due)
-        due = billing.next_payment_date(sub, due + timedelta(days=1))
-    return dates
-
-
 def build_calendar(subscriptions: list[Subscription], today: date, months: int = 12) -> tuple[str, int]:
     """The .ics text and the number of events in it."""
     end = billing.add_months(today, months)
@@ -60,13 +51,17 @@ def build_calendar(subscriptions: list[Subscription], today: date, months: int =
     ]
     count = 0
     for sub in subscriptions:
-        price = f"{sub.price:.2f} {sub.currency.value}"
-        details = [f"{sub.name}: {price} ({sub.billing_cycle.label.lower()})"]
-        if sub.is_shared:
-            details.append(f"Your share: {sub.my_share:.2f} {sub.currency.value} (split {sub.shared_with} ways)")
-        if sub.notes:
-            details.append(sub.notes)
-        for due in payment_dates(sub, today, end):
+        for due in billing.payment_dates(sub, today, end):
+            amount, currency = billing.amount_on(sub, due)  # introductory price if it applies
+            price = f"{amount:.2f} {currency.value}"
+            details = [f"{sub.name}: {price} ({sub.billing_cycle.label.lower()})"]
+            if sub.is_shared:
+                share, _ = billing.share_on(sub, due)
+                details.append(f"Your share: {share:.2f} {currency.value} (split {sub.shared_with} ways)")
+            if sub.payment_method:
+                details.append(f"Paid with: {sub.payment_method}")
+            if sub.notes:
+                details.append(sub.notes)
             count += 1
             lines += [
                 "BEGIN:VEVENT",

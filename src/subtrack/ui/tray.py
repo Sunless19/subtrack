@@ -61,6 +61,7 @@ class TrayIcon(QSystemTrayIcon):
         now = self._now()
         today = now.date()
         due = self._reminders.due_reminders(now)
+        self._reminders.record_check(now)
         if not due:
             return
         if len(due) <= MAX_SEPARATE_NOTIFICATIONS:

@@ -20,9 +20,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from subtrack.domain import billing
+from subtrack.ui.badge import badge_icon
 from subtrack.services.reminder_service import ReminderService, TimelineEntry, TimelineStatus
 
 _STATUS_COLOURS = {
+    TimelineStatus.SKIPPED: "#1565c0",
     TimelineStatus.PAID: "#2e7d32",
     TimelineStatus.NOT_MARKED_PAID: "#c62828",
     TimelineStatus.DUE_TODAY: "#e65100",
@@ -79,17 +82,21 @@ class RemindersView(QWidget):
         first_upcoming = None
         for row, entry in enumerate(self._entries):
             sub = entry.subscription
-            what = "Free trial ends" if entry.is_trial_end else "Payment"
-            if entry.is_trial_end:
-                amount = ""
-            elif sub.is_shared:
-                amount = f"{sub.my_share:.2f} of {sub.price:.2f} {sub.currency.value}"
-            else:
-                amount = f"{sub.price:.2f} {sub.currency.value}"
+            what = entry.event.value
+            amount = ""
+            if entry.is_payment:
+                full, currency = billing.amount_on(sub, entry.date)  # introductory price if it applies
+                if sub.is_shared:
+                    share, _ = billing.share_on(sub, entry.date)
+                    amount = f"{share:.2f} of {full:.2f} {currency.value}"
+                else:
+                    amount = f"{full:.2f} {currency.value}"
             status = entry.status.value + (f" {entry.detail}" if entry.detail else "")
             cells = [entry.date.strftime("%a %d %b %Y"), sub.name, what, amount, status]
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
+                if column == 1:
+                    item.setIcon(badge_icon(sub.name))
                 if column == 3:
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if entry.date < today:
@@ -107,7 +114,7 @@ class RemindersView(QWidget):
         # Keep the selection on the same item, otherwise scroll to today.
         if selected:
             for row, entry in enumerate(self._entries):
-                if (entry.subscription.id, entry.date, entry.is_trial_end) == selected:
+                if (entry.subscription.id, entry.date, entry.event) == selected:
                     self.table.selectRow(row)
                     break
         elif first_upcoming is not None:
@@ -119,7 +126,7 @@ class RemindersView(QWidget):
         if not rows or rows[0].row() >= len(self._entries):
             return None
         entry = self._entries[rows[0].row()]
-        return entry.subscription.id, entry.date, entry.is_trial_end
+        return entry.subscription.id, entry.date, entry.event
 
     def _selected(self) -> TimelineEntry | None:
         rows = self.table.selectionModel().selectedRows()
@@ -144,7 +151,7 @@ class RemindersView(QWidget):
 
     def _toggle_paid(self) -> None:
         entry = self._selected()
-        if entry is None or entry.is_trial_end:
+        if entry is None or not entry.is_payment or entry.status is TimelineStatus.SKIPPED:
             return
         if entry.status is TimelineStatus.PAID:
             self.unmark_selected_paid()

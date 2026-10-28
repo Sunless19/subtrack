@@ -75,13 +75,16 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().hide()
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # The name column (with its tags) takes the spare width; the others fit their contents.
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.doubleClicked.connect(self.edit_selected)
         self.table.selectionModel().selectionChanged.connect(self._update_actions)
 
         # Search / filter bar above the list.
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Search name, category or notes…  (Ctrl+F)")
+        self.search_edit.setPlaceholderText("Search name, category, notes or payment method…  (Ctrl+F)")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._apply_filters)
         self.category_filter = QComboBox()
@@ -89,6 +92,10 @@ class MainWindow(QMainWindow):
         for category in Category:
             self.category_filter.addItem(category.label, category)
         self.category_filter.currentIndexChanged.connect(self._apply_filters)
+        self.method_filter = QComboBox()
+        self.method_filter.setToolTip("Filter by payment method")
+        self.method_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.method_filter.currentIndexChanged.connect(self._apply_filters)
         self.show_cancelled_check = QCheckBox("Show cancelled")
         self.show_cancelled_check.toggled.connect(self._apply_filters)
         self.filter_summary = QLabel()
@@ -98,6 +105,7 @@ class MainWindow(QMainWindow):
         filter_bar = QHBoxLayout()
         filter_bar.addWidget(self.search_edit, 2)
         filter_bar.addWidget(self.category_filter)
+        filter_bar.addWidget(self.method_filter)
         filter_bar.addWidget(self.show_cancelled_check)
         filter_bar.addWidget(self.filter_summary, 1, Qt.AlignRight)
         list_page = QWidget()
@@ -118,6 +126,8 @@ class MainWindow(QMainWindow):
         self.add_action = QAction("Add", self, shortcut=QKeySequence.New, triggered=self.add)
         self.edit_action = QAction("Edit", self, triggered=self.edit_selected)
         self.cancel_action = QAction("Mark cancelled", self, triggered=self.cancel_selected)
+        self.skip_action = QAction("Skip next payment", self, triggered=self.skip_or_resume_selected)
+        self.skip_action.setToolTip("Skip only the next payment (e.g. a month you paused). Edit → More options for longer pauses.")
         self.delete_action = QAction("Delete", self, shortcut=QKeySequence.Delete, triggered=self.delete_selected)
         self.export_action = QAction("Export…", self, triggered=self.export_data)
         self.import_action = QAction("Import…", self, triggered=self.import_data)
@@ -125,7 +135,7 @@ class MainWindow(QMainWindow):
 
         toolbar = QToolBar("Main")
         toolbar.setMovable(False)
-        toolbar.addActions([self.add_action, self.edit_action, self.cancel_action, self.delete_action])
+        toolbar.addActions([self.add_action, self.edit_action, self.skip_action, self.cancel_action, self.delete_action])
         toolbar.addSeparator()
         toolbar.addActions([self.export_action, self.import_action])
         toolbar.addSeparator()
@@ -138,8 +148,11 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh(self) -> None:
-        self.model.set_rows(self._subscriptions.list_rows(include_inactive=True))
         base = self._currency.base_currency().value
+        self.model.set_rows(
+            self._subscriptions.list_rows(include_inactive=True), self._stats.spent_so_far(), base
+        )
+        self._refresh_method_filter()
         self.total_label.setText(
             f"Monthly: {self._stats.monthly_total():.2f} {base}   ·   "
             f"Yearly: {self._stats.yearly_total():.2f} {base}"
@@ -154,9 +167,26 @@ class MainWindow(QMainWindow):
         self.search_edit.setFocus()
         self.search_edit.selectAll()
 
+    def _refresh_method_filter(self) -> None:
+        """Rebuild the payment-method choices from the data, keeping the current choice."""
+        current = self.method_filter.currentData()
+        methods = self._subscriptions.payment_methods()
+        self.method_filter.blockSignals(True)
+        self.method_filter.clear()
+        self.method_filter.addItem("All payment methods", None)
+        for method in methods:
+            self.method_filter.addItem(method, method)
+        if methods:
+            self.method_filter.addItem("(not set)", "")
+        index = self.method_filter.findData(current)
+        self.method_filter.setCurrentIndex(max(index, 0))
+        self.method_filter.blockSignals(False)
+        self.method_filter.setVisible(bool(methods))
+
     def _apply_filters(self) -> None:
         self.proxy.set_search_text(self.search_edit.text())
         self.proxy.set_category(self.category_filter.currentData())
+        self.proxy.set_payment_method(self.method_filter.currentData())
         self.proxy.set_show_cancelled(self.show_cancelled_check.isChecked())
         self._update_filter_summary()
         self._update_actions()
@@ -167,7 +197,11 @@ class MainWindow(QMainWindow):
                    for r in range(self.proxy.rowCount())]
         active_total = sum(1 for r in range(self.model.rowCount()) if self.model.row_at(r).subscription.active)
         shown_active = [r for r in visible if r.subscription.active]
-        filtering = bool(self.search_edit.text().strip()) or self.category_filter.currentData() is not None
+        filtering = (
+            bool(self.search_edit.text().strip())
+            or self.category_filter.currentData() is not None
+            or self.method_filter.currentData() is not None
+        )
         if not filtering:
             self.filter_summary.setText("")
             return
@@ -199,15 +233,35 @@ class MainWindow(QMainWindow):
         for action in (self.edit_action, self.cancel_action, self.delete_action):
             action.setEnabled(row is not None)
         self.cancel_action.setText("Reactivate" if row and not row.subscription.active else "Mark cancelled")
+        self.skip_action.setEnabled(bool(row and row.subscription.active))
+        self.skip_action.setText("Resume" if row and row.paused else "Skip next payment")
 
     def add(self) -> None:
-        self._run_dialog(SubscriptionDialog(self), self._subscriptions.add)
+        dialog = SubscriptionDialog(self, payment_methods=self._subscriptions.payment_methods())
+        self._run_dialog(dialog, self._subscriptions.add)
 
     def edit_selected(self) -> None:
         row = self._selected_row()
         if row:
-            dialog = SubscriptionDialog(self, row.subscription, row.price_history)
+            dialog = SubscriptionDialog(
+                self, row.subscription, row.price_history, self._subscriptions.payment_methods()
+            )
             self._run_dialog(dialog, self._subscriptions.update)
+
+    def skip_or_resume_selected(self) -> None:
+        row = self._selected_row()
+        if not row or not row.subscription.active:
+            return
+        if row.paused:
+            self._subscriptions.resume(row.subscription.id)
+            self.statusBar().showMessage(f"{row.subscription.name} resumed", 6000)
+        else:
+            skipped = self._subscriptions.skip_next_payment(row.subscription.id)
+            if skipped:
+                self.statusBar().showMessage(
+                    f"Skipping {row.subscription.name}'s payment on {skipped:%d %b %Y}. Click Resume to undo.", 8000
+                )
+        self.refresh()
 
     def cancel_selected(self) -> None:
         row = self._selected_row()

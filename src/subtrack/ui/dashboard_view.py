@@ -1,10 +1,18 @@
-"""Dashboard tab: totals, spending per category and upcoming payments."""
+"""Dashboard tab: totals, spending per category and over time, and upcoming payments."""
 
 from datetime import date
 
-from PySide6.QtCharts import QChart, QChartView, QPieSeries
+from PySide6.QtCharts import (
+    QBarCategoryAxis,
+    QBarSet,
+    QChart,
+    QChartView,
+    QPieSeries,
+    QStackedBarSeries,
+    QValueAxis,
+)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QGroupBox,
@@ -13,12 +21,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from subtrack.services.currency_service import CurrencyService
 from subtrack.services.stats_service import StatsService
+from subtrack.ui.badge import badge_icon
 
 UPCOMING_DAYS = 30
 
@@ -56,6 +66,37 @@ class DashboardView(QWidget):
         self.chart_view.setRenderHint(QPainter.Antialiasing)
         self.chart_view.setMinimumWidth(360)
 
+        # Spending per month: the last 12 months, then a 12-month forecast. Built once;
+        # refresh() only replaces the data (re-adding axes each time would stack them).
+        self.history_chart = QChart()
+        self.history_chart.setTitle("Spending per month — last 12 months and forecast")
+        self.history_chart.legend().setAlignment(Qt.AlignBottom)
+        self.history_chart.setAnimationOptions(QChart.NoAnimation)
+        self.history_series = QStackedBarSeries()
+        self.history_chart.addSeries(self.history_series)
+        self.history_x = QBarCategoryAxis()
+        self.history_x.setLabelsAngle(-90)  # 24 months only fit side by side when vertical
+        self.history_x.setTruncateLabels(False)  # Qt would otherwise shrink them to "…"
+        small = self.history_x.labelsFont()
+        small.setPointSizeF(max(small.pointSizeF() - 1.5, 7))
+        self.history_x.setLabelsFont(small)
+        self.history_y = QValueAxis()
+        self.history_chart.addAxis(self.history_x, Qt.AlignBottom)
+        self.history_chart.addAxis(self.history_y, Qt.AlignLeft)
+        self.history_series.attachAxis(self.history_x)
+        self.history_series.attachAxis(self.history_y)
+        self.history_view = QChartView(self.history_chart)
+        self.history_view.setRenderHint(QPainter.Antialiasing)
+
+        if self.palette().window().color().lightness() < 128:  # follow Windows dark mode
+            for c in (chart, self.history_chart):
+                c.setTheme(QChart.ChartThemeDark)
+                c.setBackgroundRoundness(0)
+
+        self.chart_tabs = QTabWidget()
+        self.chart_tabs.addTab(self.chart_view, "By category")
+        self.chart_tabs.addTab(self.history_view, "Over time")
+
         self.upcoming_table = QTableWidget(0, 3)
         self.upcoming_table.setHorizontalHeaderLabels(["Date", "Subscription", "Amount"])
         self.upcoming_table.verticalHeader().hide()
@@ -66,7 +107,7 @@ class DashboardView(QWidget):
         QVBoxLayout(upcoming_box).addWidget(self.upcoming_table)
 
         bottom_row = QHBoxLayout()
-        bottom_row.addWidget(self.chart_view, 1)
+        bottom_row.addWidget(self.chart_tabs, 1)
         bottom_row.addWidget(upcoming_box, 1)
 
         layout = QVBoxLayout(self)
@@ -93,6 +134,32 @@ class DashboardView(QWidget):
         for row, payment in enumerate(upcoming):
             amount = QTableWidgetItem(f"{payment.amount_in_base:.2f} {base}")
             amount.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            name = QTableWidgetItem(payment.subscription.name)
+            name.setIcon(badge_icon(payment.subscription.name))
             self.upcoming_table.setItem(row, 0, QTableWidgetItem(payment.due_date.strftime("%a %d %b")))
-            self.upcoming_table.setItem(row, 1, QTableWidgetItem(payment.subscription.name))
+            self.upcoming_table.setItem(row, 1, name)
             self.upcoming_table.setItem(row, 2, amount)
+
+        self._refresh_history(base)
+
+    def _refresh_history(self, base: str) -> None:
+        """Stacked bars so past months and forecast months get different colours."""
+        months = self._stats.monthly_spending()
+        spent, forecast = QBarSet("Spent (estimated)"), QBarSet("Forecast")
+        spent.setColor(QColor("#1e88e5"))
+        forecast.setColor(QColor("#90caf9"))
+        for month in months:
+            value = float(month.amount)
+            spent.append(0 if month.is_forecast else value)
+            forecast.append(value if month.is_forecast else 0)
+        self.history_series.clear()
+        self.history_series.append(spent)
+        self.history_series.append(forecast)
+
+        # Category labels must be unique, so every month carries its year ("Nov 25", "Nov 26").
+        self.history_x.clear()
+        self.history_x.append([m.month.strftime("%b %y") for m in months])
+        top = max((float(m.amount) for m in months), default=0)
+        self.history_y.setRange(0, top * 1.1 if top else 1)
+        self.history_y.applyNiceNumbers()
+        self.history_y.setLabelFormat(f"%.0f {base}")

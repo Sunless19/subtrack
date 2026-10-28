@@ -22,6 +22,9 @@ class SubscriptionRow:
     monthly_cost: Decimal  # the user's share
     in_trial: bool
     price_history: tuple[PriceChange, ...] = ()
+    promo_active: bool = False  # an introductory price applies today
+    paused: bool = False  # paused today, or a pause/skip is coming up
+    cancel_by: date | None = None  # contract deadline, if still ahead
 
     @property
     def price_change_percent(self) -> Decimal | None:
@@ -47,9 +50,12 @@ class SubscriptionService:
             SubscriptionRow(
                 subscription=sub,
                 next_payment=billing.next_payment_date(sub, today),
-                monthly_cost=billing.monthly_cost(sub),
+                monthly_cost=billing.monthly_cost(sub, on=today),
                 in_trial=sub.is_trial(today),
                 price_history=tuple(history.get(sub.id, ())),
+                promo_active=sub.has_promo_on(today),
+                paused=sub.paused_until is not None and sub.paused_until >= today,
+                cancel_by=sub.cancel_by_date if sub.cancel_by_date and sub.cancel_by_date >= today else None,
             )
             for sub in self._repo.list(include_inactive)
         ]
@@ -89,6 +95,27 @@ class SubscriptionService:
         sub.active = True
         self._repo.update(sub)
 
+    def skip_next_payment(self, sub_id: int) -> date | None:
+        """Skip only the next payment (a one-payment pause). Returns the skipped date."""
+        sub = self._repo.get(sub_id)
+        if sub is None or not sub.active:
+            return None
+        skipped = billing.next_payment_date(sub, self._today())
+        sub.paused_from = sub.paused_until = skipped
+        self._repo.update(sub)
+        return skipped
+
+    def resume(self, sub_id: int) -> None:
+        """End a pause or skip."""
+        sub = self._repo.get(sub_id)
+        if sub is None:
+            return
+        sub.paused_from = sub.paused_until = None
+        self._repo.update(sub)
+
+    def payment_methods(self) -> list[str]:
+        return self._repo.payment_methods()
+
     def delete(self, sub_id: int) -> None:
         self._repo.delete(sub_id)
 
@@ -106,3 +133,16 @@ class SubscriptionService:
             raise ValidationError("Price is too large.")
         if not 1 <= sub.shared_with <= 50:
             raise ValidationError("A subscription can be shared by 1 to 50 people.")
+        sub.payment_method = sub.payment_method.strip()
+        if len(sub.payment_method) > 60:
+            raise ValidationError("Payment method must be at most 60 characters.")
+        if not 0 <= sub.notice_days <= 365:
+            raise ValidationError("Notice period must be between 0 and 365 days.")
+        if (sub.paused_from is None) != (sub.paused_until is None):
+            raise ValidationError("A pause needs both a start and an end date.")
+        if sub.paused_from is not None and sub.paused_from > sub.paused_until:
+            raise ValidationError("A pause cannot end before it starts.")
+        if (sub.promo_price is None) != (sub.promo_until is None):
+            raise ValidationError("An introductory price needs both an amount and an end date.")
+        if sub.promo_price is not None and not 0 <= sub.promo_price <= Decimal("1000000"):
+            raise ValidationError("Introductory price must be between 0 and 1,000,000.")

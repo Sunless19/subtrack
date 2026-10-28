@@ -13,8 +13,17 @@ from subtrack.domain.models import BillingCycle, Category, Currency, PriceChange
 
 _COLUMNS = (
     "name, price, currency, billing_cycle, first_payment_date, category, "
-    "trial_end_date, rarely_used, active, notes, shared_with"
+    "trial_end_date, rarely_used, active, notes, shared_with, payment_method, "
+    "contract_end_date, notice_days, paused_from, paused_until, promo_price, promo_until"
 )
+
+
+def _iso(value: date | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _date(value: str | None) -> date | None:
+    return date.fromisoformat(value) if value else None
 
 
 def _to_row(sub: Subscription) -> tuple:
@@ -30,6 +39,13 @@ def _to_row(sub: Subscription) -> tuple:
         int(sub.active),
         sub.notes,
         sub.shared_with,
+        sub.payment_method,
+        _iso(sub.contract_end_date),
+        sub.notice_days,
+        _iso(sub.paused_from),
+        _iso(sub.paused_until),
+        str(sub.promo_price) if sub.promo_price is not None else None,
+        _iso(sub.promo_until),
     )
 
 
@@ -47,6 +63,13 @@ def _from_row(row: sqlite3.Row) -> Subscription:
         active=bool(row["active"]),
         notes=row["notes"],
         shared_with=row["shared_with"],
+        payment_method=row["payment_method"],
+        contract_end_date=_date(row["contract_end_date"]),
+        notice_days=row["notice_days"],
+        paused_from=_date(row["paused_from"]),
+        paused_until=_date(row["paused_until"]),
+        promo_price=Decimal(row["promo_price"]) if row["promo_price"] is not None else None,
+        promo_until=_date(row["promo_until"]),
     )
 
 
@@ -88,6 +111,14 @@ class SubscriptionRepository:
     def delete(self, sub_id: int) -> None:
         with self._conn:
             self._conn.execute("DELETE FROM subscriptions WHERE id = ?", (sub_id,))
+
+    def payment_methods(self) -> list[str]:
+        """Distinct non-empty payment methods, for the filter and the dialog's suggestions."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT payment_method FROM subscriptions WHERE payment_method != '' "
+            "ORDER BY payment_method COLLATE NOCASE"
+        )
+        return [row[0] for row in rows]
 
     # ---- price history ------------------------------------------------------
 

@@ -74,6 +74,16 @@ MIGRATIONS: list[str] = [
         new_currency    TEXT    NOT NULL
     );
     """,
+    # 5 - payment method, contract end / notice period, pause, introductory price
+    """
+    ALTER TABLE subscriptions ADD COLUMN payment_method    TEXT    NOT NULL DEFAULT '';
+    ALTER TABLE subscriptions ADD COLUMN contract_end_date TEXT;
+    ALTER TABLE subscriptions ADD COLUMN notice_days       INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE subscriptions ADD COLUMN paused_from       TEXT;
+    ALTER TABLE subscriptions ADD COLUMN paused_until      TEXT;
+    ALTER TABLE subscriptions ADD COLUMN promo_price       TEXT;
+    ALTER TABLE subscriptions ADD COLUMN promo_until       TEXT;
+    """,
 ]
 
 

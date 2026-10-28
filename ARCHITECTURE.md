@@ -70,7 +70,8 @@ subtrack/
 │  ├─ paths.py                 where the DB, log and notification icon live
 │  ├─ domain/
 │  │  ├─ models.py             dataclasses + enums
-│  │  └─ billing.py            date & cost calculations
+│  │  ├─ billing.py            payment dates, amounts over time, costs
+│  │  └─ templates.py          common services → category + cycle
 │  ├─ data/
 │  │  ├─ database.py           sqlite connection + schema migrations
 │  │  ├─ subscription_repository.py
@@ -84,6 +85,7 @@ subtrack/
 │  │  ├─ reminder_service.py
 │  │  ├─ export_service.py
 │  │  ├─ calendar_export.py    .ics file of upcoming payments
+│  │  ├─ online_rates.py       opt-in ECB exchange rates
 │  │  └─ autostart_service.py  registry Run key (start with Windows)
 │  └─ ui/
 │     ├─ main_window.py
@@ -94,6 +96,7 @@ subtrack/
 │     ├─ reminders_view.py     Reminders tab: past/upcoming payments, mark paid
 │     ├─ notifier.py           Windows toasts with buttons (fallback: tray balloons)
 │     ├─ icon.py               app icon drawn in code
+│     ├─ badge.py              coloured letter badges for names
 │     ├─ single_instance.py    one running copy per data folder; installer mutex
 │     └─ tray.py               tray icon, reminder checks, notification button actions
 └─ tests/
@@ -106,7 +109,8 @@ subtrack/
    ├─ test_export_service.py
    ├─ test_autostart_service.py
    ├─ test_notifications.py   tray + notification actions, v0.1 → v0.2 upgrade
-   └─ test_v02_features.py    shared costs, price history, .ics, search/filter/sort
+   ├─ test_v02_features.py    shared costs, price history, .ics, search/filter/sort
+   └─ test_v03_features.py    contracts, catch-up, pause, intro price, history, templates, rates
 ```
 
 ---
@@ -218,6 +222,29 @@ CREATE TABLE price_changes (
 Migrations are numbered and tracked with `PRAGMA user_version`. A test opens a
 database made by v0.1 and checks that it upgrades without losing data.
 
+### Migration 5 (v0.3)
+
+```sql
+ALTER TABLE subscriptions ADD COLUMN payment_method    TEXT    NOT NULL DEFAULT '';
+ALTER TABLE subscriptions ADD COLUMN contract_end_date TEXT;      -- renews unless cancelled
+ALTER TABLE subscriptions ADD COLUMN notice_days       INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE subscriptions ADD COLUMN paused_from       TEXT;      -- payments in [from, until]
+ALTER TABLE subscriptions ADD COLUMN paused_until      TEXT;      --   are skipped
+ALTER TABLE subscriptions ADD COLUMN promo_price       TEXT;      -- introductory price
+ALTER TABLE subscriptions ADD COLUMN promo_until       TEXT;      --   charged up to this date
+```
+
+"Skip next payment" is a one-day pause (`paused_from = paused_until = next payment`).
+`cancel_by_date = contract_end_date − notice_days`.
+
+### Amounts over time
+
+`billing.amount_on(sub, day, history)` is the single answer to "what was / will
+be charged on this day": the introductory price if it applies, otherwise the
+price from the price history, otherwise the current price. `share_on` divides
+it by `shared_with`. Spent-so-far, the 24-month chart, upcoming payments,
+reminders and the calendar all use it, so they always agree.
+
 ### Shared costs
 
 `price` is always the full price that gets charged. `my_share = price / shared_with`.
@@ -236,6 +263,9 @@ share; reminders and the calendar show both ("60.00 RON … Your share: 20.00 RO
 | `ReminderService`     | due reminders (early, day-of, trial ending), snooze, mark paid, Reminders-tab timeline |
 | `ExportService`       | export to CSV / JSON / .ics calendar, import CSV / JSON (all-or-nothing, skips duplicates) |
 | `calendar_export`     | builds the .ics (RFC 5545): one all-day event per payment for 12 months, alarm the day before, stable UIDs |
+| `StatsService`        | (also) spent so far per subscription, spending per month for 12 past + 12 future months |
+| `online_rates`        | opt-in ECB exchange rates from frankfurter.dev; only called from Settings → "Update rates online" |
+| `domain/templates`    | ~60 common services → category + billing cycle (no prices: they vary by country and plan) |
 | `AutostartService`    | start with Windows via `HKCU\…\CurrentVersion\Run`, launches `--minimized` |
 
 ---
@@ -252,7 +282,12 @@ share; reminders and the calendar show both ("60.00 RON … Your share: 20.00 RO
 **Reminders**
 - Each payment gets up to two reminders: *payment coming up* N days before
   (Settings, default 3) and *payment due today* on the day. Free trials get
-  *free trial ending*. Each is shown once.
+  *free trial ending*, contracts *last day to cancel*, introductory prices
+  *introductory price ending*. Each is shown once.
+- **Catch-up:** the time of every check is saved (`last_reminder_check`). At the
+  next start, payment days that passed since then (at most 7 days back) and were
+  neither reminded nor marked paid produce *payment while you were away*. The
+  first run ever catches up on nothing, so a new user is not flooded.
 - On Windows the notification is a native toast with **Mark as paid**,
   **Remind me in 1 hour** and **Remind me tomorrow** (09:00). The day-of toast
   uses the "reminder" style, which stays on screen until acted on. Clicking the
@@ -326,6 +361,14 @@ recorded price; Edit lists every change.
 | Shared subscriptions (my share)        | ✅ done, tested |
 | Price-change history                   | ✅ done, tested |
 | Search / filter / sort, reactivate     | ✅ done, tested |
+| Contract end + notice period reminder  | ✅ done, tested (v0.3) |
+| Missed-reminder catch-up               | ✅ done, tested (v0.3) |
+| Payment method + filter                | ✅ done, tested (v0.3) |
+| Pause / skip next payment              | ✅ done, tested (v0.3) |
+| Introductory price                     | ✅ done, tested (v0.3) |
+| Spent so far, 12 + 12 month chart      | ✅ done, tested (v0.3) |
+| Templates + letter badges              | ✅ done, tested (v0.3) |
+| Online exchange rates (opt-in)         | ✅ done, tested with a fake server (v0.3) |
 | Start with Windows                     | ✅ done, tested (fake registry) |
 | Single instance (second launch shows the window) | ✅ done |
 | Packaging as .exe (PyInstaller)        | ✅ done, built and smoke-tested locally |
@@ -359,3 +402,23 @@ src/ ──PyInstaller (subtrack.spec)──▶ dist\SubTrack\SubTrack.exe  (+ _
   watches, so a running SubTrack is closed before files are replaced.
 - **Version** lives only in `src/subtrack/__init__.py`; the spec (exe file
   properties), the installer (via `/DAppVersion`) and the release tag check all read it.
+
+---
+
+## 8. Web version (not built)
+
+The layers make a web version mostly a new UI, not a rewrite:
+
+| Layer | Desktop today | Web version |
+|-------|---------------|-------------|
+| Domain (`models`, `billing`, `templates`) | pure Python | reused unchanged |
+| Services | no Qt imports | reused unchanged, behind a small HTTP API (FastAPI) |
+| Data | SQLite file per user | SQLite or PostgreSQL with a `user_id` column per table |
+| UI | PySide6 windows | HTML/JS front end (e.g. React or htmx) |
+| Reminders | Windows toasts from the tray | Web Push to the browser / phone (PWA), or e-mail, sent by a scheduled job on the server |
+| Calendar | .ics export | a private iCal feed URL calendars subscribe to |
+
+New work a web version needs that the desktop app does not: user accounts and
+login, hosting (e.g. a small container on Fly.io, Render or AWS — this is where
+Docker / ECR make sense), backups of the shared database, HTTPS, and privacy
+handling because the data leaves the user's PC.
