@@ -4,8 +4,9 @@ Every endpoint calls the same services the desktop app uses, so both always
 calculate the same way. By default it reads and writes the desktop app's own
 database (%APPDATA%\\SubTrack\\subtrack.db), so both see the same data.
 
-Each request opens its own database connection: SQLite connections cannot be
-shared between FastAPI's worker threads.
+Each request opens its own database connection. FastAPI may run one request's
+steps on different worker threads, so that connection is allowed to move between
+threads (it is never used by two requests at once).
 
 Interactive documentation: http://127.0.0.1:8765/docs
 """
@@ -19,7 +20,8 @@ from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from subtrack import __version__, paths
@@ -38,6 +40,7 @@ from subtrack.services.stats_service import StatsService
 from subtrack.services.subscription_service import SubscriptionService, ValidationError
 
 API_KEY_HEADER = "X-API-Key"
+WEB_DIR = Path(__file__).parent / "web"  # the browser interface (plain HTML/CSS/JS)
 
 
 @dataclass
@@ -66,8 +69,11 @@ def create_app(db_path: Path | str | None = None, api_key: str | None = None, to
 
     @app.middleware("http")
     async def require_api_key(request: Request, call_next):
-        open_paths = ("/health", "/docs", "/redoc", "/openapi.json")
-        if api_key and request.url.path not in open_paths:
+        # The web pages themselves are open; the data they load is protected.
+        # (The page asks for the key once and sends it with every request.)
+        open_paths = ("/", "/health", "/health/key", "/docs", "/redoc", "/openapi.json")
+        path = request.url.path
+        if api_key and path not in open_paths and not path.startswith("/web/"):
             if not secrets.compare_digest(request.headers.get(API_KEY_HEADER, ""), api_key):
                 return JSONResponse({"detail": f"Missing or wrong {API_KEY_HEADER} header."}, status_code=401)
         return await call_next(request)
@@ -77,7 +83,7 @@ def create_app(db_path: Path | str | None = None, api_key: str | None = None, to
         return JSONResponse({"detail": str(error)}, status_code=422)
 
     def services() -> Iterator[Services]:
-        db = Database(database_path)
+        db = Database(database_path, shared_across_threads=True)
         try:
             subscription_repo = SubscriptionRepository(db)
             settings = SettingsRepository(db)
@@ -295,5 +301,18 @@ def create_app(db_path: Path | str | None = None, api_key: str | None = None, to
         finally:
             os.remove(temp)
         return schemas.ImportResultOut(imported=result.imported, skipped_duplicates=result.skipped_duplicates)
+
+    # ---- web interface ---------------------------------------------------------------
+
+    @app.get("/", include_in_schema=False)
+    def home():
+        return RedirectResponse("/web/")
+
+    @app.get("/health/key", tags=["general"])
+    def key_required():
+        """Lets the web page know whether it must ask for an API key."""
+        return {"api_key_required": bool(api_key)}
+
+    app.mount("/web", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     return app

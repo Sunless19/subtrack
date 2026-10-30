@@ -68,6 +68,7 @@ subtrack/
 │  ├─ __main__.py              entry point: python -m subtrack
 │  ├─ app.py                   composition root, starts Qt
 │  ├─ api/                     HTTP API (FastAPI): app.py, schemas.py, __main__.py
+│  │  └─ web/                 browser interface: index.html, styles.css, app.js, icon.svg
 │  ├─ paths.py                 where the DB, log and notification icon live
 │  ├─ domain/
 │  │  ├─ models.py             dataclasses + enums
@@ -466,6 +467,19 @@ HTTP API (FastAPI) ────┘        │
 - Money is serialised as decimal strings; request bodies reject unknown fields.
 - Not bundled in the desktop .exe (nothing in the app imports it).
 - Tests: `tests/test_api.py` (FastAPI TestClient against a temporary database).
+
+### Web interface
+
+`src/subtrack/api/web/` (`index.html`, `styles.css`, `app.js`, `icon.svg`) is served by
+the same server at `/web/` (`/` redirects there). Plain HTML/CSS/JavaScript — no
+framework, no build step, no CDN — so it works offline and costs nothing.
+
+- Every number comes from the API; the page only formats and draws (charts are CSS bars).
+- The dropdown values (currencies, cycles, categories) are read from `/openapi.json`, so
+  they cannot drift from the server's enums.
+- With an API key configured, the pages stay open but the data does not: the page asks for
+  the key once, keeps it in the browser's local storage and sends it as `X-API-Key`.
+- Phones: the subscription list turns into one card per subscription.
 
 ## 10. Web version (not built)
 

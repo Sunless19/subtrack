@@ -54,16 +54,23 @@ $env:PYTHONPATH = "src"; .\.venv\Scripts\python.exe -m subtrack
 
 Data is stored in `%APPDATA%\SubTrack\subtrack.db`.
 
-## HTTP API
+## Web interface and HTTP API
 
-Everything the app calculates is also available over HTTP, for scripts, a future web
-front end or a phone app. Free and local: FastAPI + uvicorn, no hosting.
+SubTrack also runs in the browser, and everything it calculates is available over HTTP
+for scripts or a phone app. Free and local: FastAPI + uvicorn, no hosting, no build tools.
 
 ```powershell
 $env:PYTHONPATH = "src"; .\.venv\Scripts\python.exe -m subtrack.api
 ```
 
-Then open **http://127.0.0.1:8765/docs** to see and try every endpoint in the browser.
+- **http://127.0.0.1:8765/** — the web interface: Subscriptions (search, filters, sort,
+  add/edit with templates, skip, cancel), Dashboard (totals, 24-month chart, categories,
+  upcoming), Reminders (due now, mark paid, snooze, 60-day timeline) and Settings
+  (currency, rates, export/import). Light/dark follows the system; works on phones.
+- **http://127.0.0.1:8765/docs** — every API endpoint, to read and try.
+
+If the server is already running from an older version, stop it (Ctrl+C) and start it
+again to get the latest pages.
 
 - Uses the desktop app's database by default, so both show the same data
   (`--db other.db` for a separate file).

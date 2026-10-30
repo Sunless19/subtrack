@@ -88,9 +88,14 @@ MIGRATIONS: list[str] = [
 
 
 class Database:
-    def __init__(self, path: Path | str):
-        """Open the database at path (":memory:" works for tests) and migrate it."""
-        self.connection = sqlite3.connect(str(path))
+    def __init__(self, path: Path | str, shared_across_threads: bool = False):
+        """Open the database at path (":memory:" works for tests) and migrate it.
+
+        shared_across_threads: the HTTP API opens one connection per request, but FastAPI
+        may run that request's steps on different worker threads. The connection is still
+        used by one request at a time, so sqlite's same-thread check is turned off there.
+        """
+        self.connection = sqlite3.connect(str(path), check_same_thread=not shared_across_threads, timeout=10)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self._migrate()

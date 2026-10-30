@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SubTrack</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icon.svg" alt="" width="28" height="28"><span>SubTrack</span></div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-page="subscriptions" aria-selected="true">Subscriptions</button>
+      <button role="tab" data-page="dashboard">Dashboard</button>
+      <button role="tab" data-page="reminders">Reminders <span id="due-count" class="pill" hidden></span></button>
+      <button role="tab" data-page="settings">Settings</button>
+    </nav>
+    <div class="totals" id="totals" aria-live="polite"></div>
+  </header>
+
+  <main>
+    <!-- Subscriptions -->
+    <section id="page-subscriptions" class="page" aria-label="Subscriptions">
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search name, category, notes, payment method…" aria-label="Search">
+        <select id="filter-category" aria-label="Category"><option value="">All categories</option></select>
+        <select id="filter-method" aria-label="Payment method" hidden><option value="">All payment methods</option></select>
+        <label class="check"><input id="show-cancelled" type="checkbox"> Show cancelled</label>
+        <span id="filter-summary" class="muted"></span>
+        <button id="add-button" class="primary">+ Add</button>
+      </div>
+      <div class="table-wrap">
+        <table id="subs-table" class="data">
+          <thead>
+            <tr>
+              <th data-sort="name">Name</th>
+              <th data-sort="category">Category</th>
+              <th data-sort="price" class="num">Price</th>
+              <th data-sort="cycle">Cycle</th>
+              <th data-sort="monthly" class="num">Per month</th>
+              <th data-sort="next">Next payment</th>
+              <th data-sort="spent" class="num">Spent so far</th>
+              <th class="actions-col"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="subs-empty" class="empty" hidden>No subscriptions yet. Click <b>+ Add</b> to start.</p>
+      </div>
+    </section>
+
+    <!-- Dashboard -->
+    <section id="page-dashboard" class="page" aria-label="Dashboard" hidden>
+      <div class="cards">
+        <div class="card stat"><span class="label">Per month</span><span id="stat-monthly" class="value">–</span></div>
+        <div class="card stat"><span class="label">Per year</span><span id="stat-yearly" class="value">–</span></div>
+        <div class="card stat"><span class="label">Due in next 30 days</span><span id="stat-upcoming" class="value">–</span></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Spending per month <span class="muted small">last 12 months and forecast</span></h2>
+          <div id="chart-months" class="bars" role="img" aria-label="Spending per month"></div>
+          <div class="legend"><span class="key spent"></span>Spent (estimated) <span class="key forecast"></span>Forecast</div>
+        </div>
+        <div class="card">
+          <h2>Per month by category</h2>
+          <div id="chart-categories"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Upcoming payments <span class="muted small">next 30 days</span></h2>
+        <table class="data compact"><tbody id="upcoming"></tbody></table>
+      </div>
+    </section>
+
+    <!-- Reminders -->
+    <section id="page-reminders" class="page" aria-label="Reminders" hidden>
+      <div class="card" id="due-card" hidden>
+        <h2>Due now</h2>
+        <ul id="due-list" class="due-list"></ul>
+      </div>
+      <div class="card">
+        <h2>Payments and dates <span class="muted small">last 30 and next 30 days</span></h2>
+        <table class="data compact">
+          <thead><tr><th>Date</th><th>Subscription</th><th>What</th><th>Status</th><th></th></tr></thead>
+          <tbody id="timeline"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="page-settings" class="page" aria-label="Settings" hidden>
+      <div class="grid-2">
+        <form id="settings-form" class="card form">
+          <h2>Settings</h2>
+          <label>Show totals in <select name="base_currency"></select></label>
+          <label>1 EUR = <span class="inline"><input name="rate_EUR" type="number" step="0.0001" min="0.0001"> RON</span></label>
+          <label>1 USD = <span class="inline"><input name="rate_USD" type="number" step="0.0001" min="0.0001"> RON</span></label>
+          <p class="muted small" id="rates-note"></p>
+          <label>Remind me <span class="inline"><input name="reminder_days_before" type="number" min="0" max="30"> days before a payment</span></label>
+          <div class="buttons"><button class="primary" type="submit">Save</button></div>
+        </form>
+        <div class="card form">
+          <h2>Export and import</h2>
+          <p class="muted">Backups, spreadsheets and calendars.</p>
+          <div class="buttons wrap">
+            <button data-export="csv">Export CSV (Excel)</button>
+            <button data-export="json">Export JSON backup</button>
+            <button data-export="ics">Export calendar (.ics)</button>
+          </div>
+          <label class="file">Import a CSV or JSON file
+            <input id="import-file" type="file" accept=".csv,.json">
+          </label>
+          <hr>
+          <p class="muted small">Server: <span id="server-info"></span> · <a href="/docs" target="_blank" rel="noopener">API docs</a></p>
+          <button id="forget-key" class="link" hidden>Forget API key on this device</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Add / edit -->
+  <dialog id="edit-dialog" aria-labelledby="edit-title">
+    <form id="edit-form" method="dialog" class="form">
+      <h2 id="edit-title">Add subscription</h2>
+      <label>Name <input name="name" required maxlength="100" list="templates" autocomplete="off" placeholder="e.g. Netflix"></label>
+      <datalist id="templates"></datalist>
+      <div class="row">
+        <label class="grow">Price <input name="price" type="number" step="0.01" min="0" required></label>
+        <label>Currency <select name="currency"></select></label>
+      </div>
+      <p id="price-history" class="muted small" hidden></p>
+      <div class="row">
+        <label>Split between <span class="inline"><input name="shared_with" type="number" min="1" max="50" value="1"> people</span></label>
+        <span id="share-preview" class="muted small"></span>
+      </div>
+      <div class="row">
+        <label class="grow">Billing cycle <select name="billing_cycle"></select></label>
+        <label class="grow">Category <select name="category"></select></label>
+      </div>
+      <label>First payment <input name="first_payment_date" type="date" required></label>
+      <div class="row">
+        <label class="check"><input type="checkbox" data-toggle="trial"> Free trial until</label>
+        <input name="trial_end_date" type="date" data-group="trial" aria-label="Free trial end date">
+      </div>
+      <label class="check"><input name="rarely_used" type="checkbox"> I rarely use this</label>
+      <label>Notes <textarea name="notes" rows="2"></textarea></label>
+
+      <details id="more-options">
+        <summary>More options</summary>
+        <label>Paid with <input name="payment_method" list="methods" maxlength="60" placeholder="e.g. Revolut card, PayPal"></label>
+        <datalist id="methods"></datalist>
+        <div class="row">
+          <label class="check"><input type="checkbox" data-toggle="contract"> Contract ends</label>
+          <input name="contract_end_date" type="date" data-group="contract" aria-label="Contract end date">
+          <span class="inline">cancel <input name="notice_days" type="number" min="0" max="365" value="0" data-group="contract" aria-label="Notice period in days"> days before</span>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" data-toggle="pause"> Paused from</label>
+          <input name="paused_from" type="date" data-group="pause" aria-label="Paused from">
+          <span>until</span>
+          <input name="paused_until" type="date" data-group="pause" aria-label="Paused until">
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" data-toggle="promo"> Intro price</label>
+          <input name="promo_price" type="number" step="0.01" min="0" data-group="promo" aria-label="Intro price">
+          <span>until</span>
+          <input name="promo_until" type="date" data-group="promo" aria-label="Intro price until">
+        </div>
+      </details>
+
+      <p id="edit-error" class="error" role="alert" hidden></p>
+      <div class="buttons">
+        <button type="button" id="edit-cancel">Cancel</button>
+        <button type="submit" class="primary" id="edit-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- API key, only when the server requires one -->
+  <dialog id="key-dialog">
+    <form id="key-form" method="dialog" class="form">
+      <h2>API key</h2>
+      <p class="muted">This SubTrack server needs its API key. It is remembered on this device only.</p>
+      <label>Key <input name="key" type="password" required autocomplete="current-password"></label>
+      <p id="key-error" class="error" hidden>That key was not accepted.</p>
+      <div class="buttons"><button class="primary" type="submit">Continue</button></div>
+    </form>
+  </dialog>
+
+  <div id="toasts" aria-live="polite"></div>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

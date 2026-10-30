@@ -143,3 +143,29 @@ def test_api_key(tmp_path):
         assert c.get("/subscriptions").status_code == 401
         assert c.get("/subscriptions", headers={"X-API-Key": "wrong"}).status_code == 401
         assert c.get("/subscriptions", headers={"X-API-Key": "s3cret"}).status_code == 200
+
+
+def test_parallel_requests(client):
+    """Browsers load several endpoints at once; each request's connection may hop threads."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    add(client)
+    paths = ["/subscriptions", "/stats/summary", "/stats/spent", "/settings", "/reminders/due", "/stats/monthly"] * 4
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        codes = list(pool.map(lambda p: client.get(p).status_code, paths))
+    assert codes == [200] * len(paths)
+
+
+def test_web_interface_is_served(client):
+    assert client.get("/", follow_redirects=False).headers["location"] == "/web/"
+    page = client.get("/web/")
+    assert page.status_code == 200 and "<title>SubTrack</title>" in page.text
+    for asset in ("app.js", "styles.css", "icon.svg"):
+        assert client.get(f"/web/{asset}").status_code == 200
+
+
+def test_web_pages_stay_open_when_a_key_is_required(tmp_path):
+    with TestClient(create_app(tmp_path / "k.db", api_key="s3cret")) as c:
+        assert c.get("/web/").status_code == 200
+        assert c.get("/health/key").json() == {"api_key_required": True}
+        assert c.get("/stats/summary").status_code == 401
