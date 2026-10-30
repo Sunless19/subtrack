@@ -85,16 +85,45 @@ kept as workflow artifacts for 14 days.
 
 To publish a release:
 
-1. Bump `__version__` in [src/subtrack/__init__.py](src/subtrack/__init__.py), e.g. to `0.2.0`, and commit.
-2. Tag and push:
+1. Bump `__version__` in [src/subtrack/__init__.py](src/subtrack/__init__.py), e.g. to `0.5.0`.
+2. Write the notes in `release-notes/v0.5.0.md` (optional; a short default is used otherwise) and commit.
+3. Tag and push:
    ```powershell
-   git tag v0.2.0
-   git push origin main v0.2.0
+   git tag v0.5.0
+   git push origin main v0.5.0
    ```
-3. The workflow builds everything and creates the GitHub Release with the installer,
-   the portable zip and `SHA256SUMS.txt`. People download it from the Releases page.
+4. The workflow builds everything and creates the release in **two** places:
+   - this (private) repo, and
+   - the public [Sunless19/subtrack-releases](https://github.com/Sunless19/subtrack-releases),
+     which is where installed copies look for updates and where people download it.
 
 The build fails if the tag does not match `__version__`.
+
+### Automatic updates: one-time setup
+
+Publishing to the public repo needs a token, stored as a secret of this repo
+(never in the app). Until it is set, releases still work, but the public step is
+skipped with a warning and installed copies won't see the new version.
+
+1. GitHub → your avatar → **Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token**.
+2. Name `subtrack-releases`, expiration up to 1 year, **Repository access: Only select
+   repositories → `Sunless19/subtrack-releases`**.
+3. **Permissions → Repository permissions → Contents: Read and write**. Nothing else.
+4. Generate, copy the token.
+5. This repo → **Settings → Secrets and variables → Actions → New repository secret**:
+   name `RELEASES_TOKEN`, paste the token.
+
+When the token expires, generate a new one the same way and update the secret.
+
+### How updating works
+
+Installed copies check `api.github.com/repos/Sunless19/subtrack-releases/releases/latest`
+1 minute after starting and every 6 hours. A newer version's installer is downloaded to
+`%LOCALAPPDATA%\SubTrack\updates`, checked against `SHA256SUMS.txt`, and run silently:
+right away if SubTrack is in the tray, when the user quits, or when they click
+"Restart to update". SubTrack starts again afterwards. Both behaviours can be switched
+off in Settings. Portable copies only show a notification with the download page.
 
 ## Icon
 

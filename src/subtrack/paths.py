@@ -20,3 +20,9 @@ def database_path() -> Path:
 
 def log_path() -> Path:
     return data_dir() / "subtrack.log"
+
+
+def updates_dir() -> Path:
+    """Downloaded installers: %LOCALAPPDATA%\\SubTrack\\updates (not roaming; they are big and temporary)."""
+    local = os.environ.get("LOCALAPPDATA")
+    return (Path(local) / APP_NAME / "updates") if local else data_dir() / "updates"

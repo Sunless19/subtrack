@@ -31,7 +31,7 @@ class TrayIcon(QSystemTrayIcon):
         menu = QMenu()
         menu.addAction(QAction("Open SubTrack", menu, triggered=self.show_window))
         menu.addAction(QAction("Check reminders now", menu, triggered=self.check_reminders))
-        menu.addSeparator()
+        self._quit_separator = menu.addSeparator()
         menu.addAction(QAction("Quit", menu, triggered=QApplication.quit))
         self._menu = menu  # keep a reference; Qt does not own it
         self.setContextMenu(menu)
@@ -42,6 +42,9 @@ class TrayIcon(QSystemTrayIcon):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.check_reminders)
         self._timer.start(CHECK_INTERVAL_MS)
+
+    def add_update_action(self, check) -> None:
+        self._menu.insertAction(self._quit_separator, QAction("Check for updates", self._menu, triggered=check))
 
     def show_window(self, reminders_tab: bool = False) -> None:
         self._window.refresh()

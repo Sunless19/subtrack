@@ -69,4 +69,15 @@ Root: HKCU; Subkey: "{#RunKey}"; ValueType: none; ValueName: "{#AppName}"; Flags
 Root: HKCU; Subkey: "Software\Classes\AppUserModelId\SubTrack.App"; ValueType: none; Flags: uninsdeletekey
 
 [Run]
+; Normal (interactive) install: the usual "Launch SubTrack" checkbox on the last page.
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Automatic update (silent install started by the app, see src\subtrack\services\updater.py):
+; /RELAUNCH=show|minimized|none says whether and how to start SubTrack again.
+Filename: "{app}\{#AppExe}"; Parameters: "--after-update"; Flags: nowait; Check: Relaunch('show')
+Filename: "{app}\{#AppExe}"; Parameters: "--after-update --minimized"; Flags: nowait; Check: Relaunch('minimized')
+
+[Code]
+function Relaunch(Mode: String): Boolean;
+begin
+  Result := WizardSilent and (CompareText(ExpandConstant('{param:RELAUNCH|none}'), Mode) = 0);
+end;

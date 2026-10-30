@@ -89,17 +89,49 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # Public repo that installed copies check for updates (src/subtrack/services/updater.py).
+      PUBLIC_REPO: Sunless19/subtrack-releases
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: release-notes
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: Publish GitHub Release
+      - name: Pick release notes
+        id: notes
+        run: |
+          # release-notes/<tag>.md if it exists, otherwise a short default.
+          file="release-notes/${{ github.ref_name }}.md"
+          if [ ! -f "$file" ]; then
+            file="$RUNNER_TEMP/notes.md"
+            echo "SubTrack ${{ github.ref_name }}. Download **SubTrack-*-setup.exe** to install or update." > "$file"
+          fi
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release (this repo)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" dist/* \
             --repo "${{ github.repository }}" \
             --title "SubTrack ${{ github.ref_name }}" \
-            --generate-notes
+            --notes-file "${{ steps.notes.outputs.file }}"
+
+      - name: Publish to the public releases repo (automatic updates)
+        env:
+          # Fine-grained token with "Contents: read and write" on the public repo only.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::RELEASES_TOKEN secret is not set, so installed copies will not see this version. See README → Releasing."
+            exit 0
+          fi
+          gh release create "${{ github.ref_name }}" dist/* \
+            --repo "$PUBLIC_REPO" \
+            --title "SubTrack ${{ github.ref_name }}" \
+            --notes-file "${{ steps.notes.outputs.file }}"

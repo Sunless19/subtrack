@@ -22,7 +22,9 @@ from subtrack.ui.icon import app_icon
 from subtrack.ui.main_window import MainWindow
 from subtrack.ui.notifier import set_process_app_id
 from subtrack.ui.single_instance import InstanceServer, notify_running_instance
+from subtrack.services import updater
 from subtrack.ui.tray import TrayIcon
+from subtrack.ui.update_manager import UpdateManager
 
 
 def _setup_logging() -> None:
@@ -101,6 +103,17 @@ def run() -> int:
         app.setQuitOnLastWindowClosed(False)
     else:
         instance.show_requested.connect(window.showNormal)
+
+        # Automatic updates need the tray (to keep running and to notify).
+        updates = UpdateManager(settings, tray.notifier, window, parent=app)
+        window.set_update_manager(updates)
+        tray.add_update_action(lambda: window.check_for_updates())
+
+    if "--after-update" in sys.argv:
+        updater.cleanup(paths.updates_dir())
+        logging.getLogger(__name__).info("Updated to %s", __version__)
+        if tray:
+            tray.notifier.show_summary(f"SubTrack updated to {__version__}", "See what's new on the releases page.")
 
     # --minimized is passed by the "start with Windows" entry: start quietly in the tray.
     if not (tray and minimized):

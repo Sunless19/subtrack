@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QTableView,
     QTabWidget,
     QToolBar,
@@ -23,8 +24,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from subtrack import paths
+from subtrack import __version__, paths
 from subtrack.data.settings_repository import SettingsRepository
+from subtrack.services import updater
 from subtrack.services.autostart_service import AutostartService
 from subtrack.services.currency_service import CurrencyService
 from subtrack.services.export_service import ExportService, ImportFailed
@@ -144,6 +146,13 @@ class MainWindow(QMainWindow):
 
         self.total_label = QLabel()
         self.statusBar().addPermanentWidget(self.total_label)
+
+        # Shown once an update is downloaded and verified.
+        self.update_button = QPushButton()
+        self.update_button.setVisible(False)
+        self.statusBar().addPermanentWidget(self.update_button)
+        self._updates = None
+        self._manual_check = False
 
         self.refresh()
 
@@ -291,8 +300,74 @@ class MainWindow(QMainWindow):
             self._subscriptions.delete(row.subscription.id)
             self.refresh()
 
+    # ---- updates ------------------------------------------------------------------
+
+    def set_update_manager(self, updates) -> None:
+        self._updates = updates
+        updates.finished.connect(self._on_update_check_finished)
+
+    def show_update_ready(self, version: str, install) -> None:
+        self.update_button.setText(f"Restart to update to {version}")
+        try:
+            self.update_button.clicked.disconnect()
+        except (RuntimeError, TypeError):
+            pass  # nothing connected yet
+        self.update_button.clicked.connect(lambda: install(show_window_after=True))
+        self.update_button.setVisible(True)
+
+    def check_for_updates(self) -> None:
+        """Manual check (tray menu / Settings): always reports the result in a message box."""
+        if self._updates is None:
+            QMessageBox.information(self, "Check for updates", "Updates are not available in this copy of SubTrack.")
+            return
+        if self._updates.pending is not None:
+            self.showNormal()
+            self.raise_()
+            self._ask_to_install(self._updates.pending)
+            return
+        self._manual_check = True
+        if self._updates.check(manual=True):
+            self.statusBar().showMessage("Checking for updates…", 5000)
+
+    def _on_update_check_finished(self, release, error: str) -> None:
+        if not self._manual_check:
+            return
+        self._manual_check = False
+        self.showNormal()
+        self.raise_()
+        if error:
+            QMessageBox.warning(self, "Check for updates", error)
+        elif self._updates.pending is not None:
+            self._ask_to_install(self._updates.pending)
+        elif release is not None and release.version > updater.current_version():
+            # Portable copy: it can't install, so offer the download page.
+            answer = QMessageBox.question(
+                self, "Update available",
+                f"SubTrack {release.version_text} is available (you have {__version__}).\n\n"
+                "This portable copy can't update itself. Open the download page?",
+            )
+            if answer == QMessageBox.Yes:
+                self._updates.open_download_page(release)
+        else:
+            QMessageBox.information(self, "Check for updates", f"SubTrack {__version__} is the latest version.")
+
+    def _ask_to_install(self, release) -> None:
+        box = QMessageBox(self)
+        box.setWindowTitle("Update ready")
+        box.setText(f"SubTrack {release.version_text} is downloaded and ready (you have {__version__}).")
+        box.setInformativeText("SubTrack will close for a few seconds and open again.")
+        install = box.addButton("Restart and update", QMessageBox.AcceptRole)
+        box.addButton("Later", QMessageBox.RejectRole)
+        notes = box.addButton("What's new", QMessageBox.HelpRole)
+        box.exec()
+        if box.clickedButton() is install:
+            self._updates.install_now(show_window_after=True)
+        elif box.clickedButton() is notes:
+            self._updates.open_download_page(release)
+
     def open_settings(self) -> None:
-        if SettingsDialog(self._currency, self._settings, self._autostart, self).exec():
+        if SettingsDialog(self._currency, self._settings, self._autostart, self,
+                          check_updates=self.check_for_updates if self._updates else None).exec():
             self.refresh()
 
     # file-dialog filter -> (extension, export method name, what the count means)

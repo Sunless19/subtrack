@@ -33,7 +33,10 @@ class SettingsDialog(QDialog):
         autostart: AutostartService,
         parent=None,
         fetch_rates=online_rates.fetch,
+        check_updates=None,
     ):
+        """check_updates: callable for the "Check now" button; None hides the update settings
+        (running from source, or no tray)."""
         super().__init__(parent)
         self._currency = currency
         self._settings = settings
@@ -41,6 +44,17 @@ class SettingsDialog(QDialog):
         self._fetch_rates = fetch_rates
         self._fetched_as_of = None  # set when online rates were loaded but not saved yet
         self.setWindowTitle("Settings")
+
+        self.auto_check_box = QCheckBox("Check for updates automatically")
+        self.auto_check_box.setChecked(settings.get("update_auto_check", "1") == "1")
+        self.auto_install_box = QCheckBox("Install updates automatically (when SubTrack is in the tray)")
+        self.auto_install_box.setChecked(settings.get("update_auto_install", "1") == "1")
+        self.auto_install_box.setEnabled(self.auto_check_box.isChecked())
+        self.auto_check_box.toggled.connect(self.auto_install_box.setEnabled)
+        self.check_now_button = QPushButton("Check now")
+        if check_updates is not None:
+            self.check_now_button.clicked.connect(check_updates)
+        self._has_updates = check_updates is not None
 
         self.base_combo = QComboBox()
         for cur in Currency:
@@ -94,6 +108,12 @@ class SettingsDialog(QDialog):
         form.addRow("", rates_row)
         form.addRow("Remind me", self.days_spin)
         form.addRow("", self.autostart_check)
+        if self._has_updates:
+            check_row = QHBoxLayout()
+            check_row.addWidget(self.auto_check_box, 1)
+            check_row.addWidget(self.check_now_button)
+            form.addRow("Updates", check_row)
+            form.addRow("", self.auto_install_box)
         form.addRow(buttons)
 
     def update_rates_online(self) -> None:
@@ -122,6 +142,9 @@ class SettingsDialog(QDialog):
             for cur, rate in rates.items():
                 self._currency.set_rate_in_ron(cur, rate)
         self._settings.set("reminder_days_before", str(self.days_spin.value()))
+        if self._has_updates:
+            self._settings.set("update_auto_check", "1" if self.auto_check_box.isChecked() else "0")
+            self._settings.set("update_auto_install", "1" if self.auto_install_box.isChecked() else "0")
 
         if self._autostart.is_supported():
             wanted = self.autostart_check.isChecked()

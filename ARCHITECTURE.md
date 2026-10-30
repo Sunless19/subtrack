@@ -86,6 +86,7 @@ subtrack/
 │  │  ├─ export_service.py
 │  │  ├─ calendar_export.py    .ics file of upcoming payments
 │  │  ├─ online_rates.py       opt-in ECB exchange rates
+│  │  ├─ updater.py            check / download / verify / run new versions
 │  │  └─ autostart_service.py  registry Run key (start with Windows)
 │  └─ ui/
 │     ├─ main_window.py
@@ -98,7 +99,8 @@ subtrack/
 │     ├─ icon.py               app icon drawn in code
 │     ├─ badge.py              coloured letter badges for names
 │     ├─ single_instance.py    one running copy per data folder; installer mutex
-│     └─ tray.py               tray icon, reminder checks, notification button actions
+│     ├─ tray.py               tray icon, reminder checks, notification button actions
+│     └─ update_manager.py     background update checks; when to install
 └─ tests/
    ├─ conftest.py
    ├─ test_billing.py
@@ -110,7 +112,8 @@ subtrack/
    ├─ test_autostart_service.py
    ├─ test_notifications.py   tray + notification actions, v0.1 → v0.2 upgrade
    ├─ test_v02_features.py    shared costs, price history, .ics, search/filter/sort
-   └─ test_v03_features.py    contracts, catch-up, pause, intro price, history, templates, rates
+   ├─ test_v03_features.py    contracts, catch-up, pause, intro price, history, templates, rates
+   └─ test_updater.py         update feed, download + checksum, install decisions
 ```
 
 ---
@@ -369,6 +372,7 @@ recorded price; Edit lists every change.
 | Spent so far, 12 + 12 month chart      | ✅ done, tested (v0.3) |
 | Templates + letter badges              | ✅ done, tested (v0.3) |
 | Online exchange rates (opt-in)         | ✅ done, tested with a fake server (v0.3) |
+| Automatic updates                      | ✅ done (v0.4); download + checksum checked against the real feed; a full silent upgrade not yet run end to end |
 | Start with Windows                     | ✅ done, tested (fake registry) |
 | Single instance (second launch shows the window) | ✅ done |
 | Packaging as .exe (PyInstaller)        | ✅ done, built and smoke-tested locally |
@@ -405,7 +409,40 @@ src/ ──PyInstaller (subtrack.spec)──▶ dist\SubTrack\SubTrack.exe  (+ _
 
 ---
 
-## 8. Web version (not built)
+## 8. Automatic updates (v0.4)
+
+```
+installed SubTrack ──(every 6 h)──▶ api.github.com/repos/Sunless19/subtrack-releases/releases/latest
+        │ newer tag?
+        ▼
+download SubTrack-<v>-setup.exe + SHA256SUMS.txt → %LOCALAPPDATA%\SubTrack\updates
+        │ checksum matches?
+        ▼
+SubTrack quits → (3 s later) setup.exe /VERYSILENT /RELAUNCH=show|minimized|none
+        │
+        ▼
+installer replaces files (data untouched) → starts SubTrack --after-update
+```
+
+- **Why a second repo:** the source repo is private, and its releases need a login to
+  download. A token inside the app would expose the private repo to anyone with the
+  .exe, so CI also publishes each release to the public, code-free
+  `Sunless19/subtrack-releases`, using a fine-grained token stored only as the
+  `RELEASES_TOKEN` Actions secret.
+- **When it installs:** immediately if the window is closed (app in the tray), on quit,
+  or when the user clicks *Restart to update*. With *Install updates automatically*
+  off, only the button and a notification appear.
+- **Safety:** HTTPS from GitHub, and the installer's SHA-256 must match
+  `SHA256SUMS.txt` or the file is deleted. The checksum guards against broken
+  downloads, not against a compromised GitHub account; code-signing the installer
+  would be the next step for that.
+- **Delay before installing:** the app launches `cmd /c "ping -n 4 … & start setup.exe …"`
+  detached and quits, so its single-instance mutex is released before Inno Setup checks
+  `AppMutex`.
+- `installer/subtrack.iss` reads `/RELAUNCH=` (via `{param:RELAUNCH}`) to decide whether
+  to start SubTrack again and whether to show the window.
+
+## 9. Web version (not built)
 
 The layers make a web version mostly a new UI, not a rewrite:
 
