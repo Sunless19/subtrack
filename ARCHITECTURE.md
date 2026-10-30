@@ -67,6 +67,7 @@ subtrack/
 ├─ src/subtrack/
 │  ├─ __main__.py              entry point: python -m subtrack
 │  ├─ app.py                   composition root, starts Qt
+│  ├─ api/                     HTTP API (FastAPI): app.py, schemas.py, __main__.py
 │  ├─ paths.py                 where the DB, log and notification icon live
 │  ├─ domain/
 │  │  ├─ models.py             dataclasses + enums
@@ -113,7 +114,8 @@ subtrack/
    ├─ test_notifications.py   tray + notification actions, v0.1 → v0.2 upgrade
    ├─ test_v02_features.py    shared costs, price history, .ics, search/filter/sort
    ├─ test_v03_features.py    contracts, catch-up, pause, intro price, history, templates, rates
-   └─ test_updater.py         update feed, download + checksum, install decisions
+   ├─ test_updater.py         update feed, download + checksum, install decisions
+   └─ test_api.py             every HTTP endpoint against a temporary database
 ```
 
 ---
@@ -442,9 +444,34 @@ installer replaces files (data untouched) → starts SubTrack --after-update
 - `installer/subtrack.iss` reads `/RELAUNCH=` (via `{param:RELAUNCH}`) to decide whether
   to start SubTrack again and whether to show the window.
 
-## 9. Web version (not built)
+## 9. HTTP API
+
+`src/subtrack/api/` exposes the services over HTTP with FastAPI (run: `python -m subtrack.api`,
+docs at `http://127.0.0.1:8765/docs`). It adds no logic of its own: each endpoint calls the
+same `SubscriptionService`, `StatsService`, `ReminderService`, `CurrencyService` and
+`ExportService` the desktop app uses, so both always agree.
+
+```
+desktop app (PySide6) ─┐
+                       ├─▶ services ─▶ domain
+HTTP API (FastAPI) ────┘        │
+                                ▼
+                        SQLite (same file by default)
+```
+
+- One database connection per request (SQLite connections can't cross FastAPI's threads).
+- `127.0.0.1` only by default. Listening on the network requires `SUBTRACK_API_KEY`;
+  clients send it as `X-API-Key` (compared in constant time). `/health` and `/docs` stay open.
+- `ValidationError` from the services becomes HTTP 422 with the same message the app shows.
+- Money is serialised as decimal strings; request bodies reject unknown fields.
+- Not bundled in the desktop .exe (nothing in the app imports it).
+- Tests: `tests/test_api.py` (FastAPI TestClient against a temporary database).
+
+## 10. Web version (not built)
 
 The layers make a web version mostly a new UI, not a rewrite:
+
+The HTTP API above is the first half of this: a web page would call it instead of the desktop UI.
 
 | Layer | Desktop today | Web version |
 |-------|---------------|-------------|

@@ -54,6 +54,40 @@ $env:PYTHONPATH = "src"; .\.venv\Scripts\python.exe -m subtrack
 
 Data is stored in `%APPDATA%\SubTrack\subtrack.db`.
 
+## HTTP API
+
+Everything the app calculates is also available over HTTP, for scripts, a future web
+front end or a phone app. Free and local: FastAPI + uvicorn, no hosting.
+
+```powershell
+$env:PYTHONPATH = "src"; .\.venv\Scripts\python.exe -m subtrack.api
+```
+
+Then open **http://127.0.0.1:8765/docs** to see and try every endpoint in the browser.
+
+- Uses the desktop app's database by default, so both show the same data
+  (`--db other.db` for a separate file).
+- Only reachable from this PC (`127.0.0.1`). To reach it from your phone on the same
+  Wi-Fi, set an API key first: `$env:SUBTRACK_API_KEY = "something-long"`, then
+  `--host 0.0.0.0`; clients send it as the `X-API-Key` header.
+- Money is sent as strings (`"49.99"`), dates as `YYYY-MM-DD`.
+
+| Area | Endpoints |
+|------|-----------|
+| Subscriptions | `GET/POST /subscriptions`, `GET/PUT/DELETE /subscriptions/{id}`, `POST …/cancel`, `…/reactivate`, `…/skip-next`, `…/resume` |
+| Stats | `GET /stats/summary`, `/stats/by-category`, `/stats/upcoming?days=30`, `/stats/monthly?back=12&ahead=12`, `/stats/spent` |
+| Reminders | `GET /reminders/due`, `/reminders/timeline`, `POST /reminders/snooze`, `PUT/DELETE /payments/{id}/{date}` |
+| Settings | `GET/PATCH /settings` |
+| Files | `GET /export/csv\|json\|ics`, `POST /import` |
+| Other | `GET /health`, `/templates` |
+
+Example:
+
+```powershell
+curl http://127.0.0.1:8765/stats/summary
+# {"base_currency":"RON","monthly_total":"124.49","yearly_total":"1493.88","active_subscriptions":2}
+```
+
 ## Tests
 
 ```powershell
